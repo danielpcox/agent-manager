@@ -45,13 +45,24 @@ export function AgentDetail({ onBack }: AgentDetailProps) {
     terminalRef.current = terminal
     fitAddonRef.current = fitAddon
 
+    const scrollDown = () => {
+      terminal.scrollToBottom()
+      requestAnimationFrame(() => { if (!disposed) terminal.scrollToBottom() })
+      setTimeout(() => { if (!disposed) terminal.scrollToBottom() }, 50)
+      setTimeout(() => { if (!disposed) terminal.scrollToBottom() }, 150)
+      setTimeout(() => { if (!disposed) terminal.scrollToBottom() }, 300)
+    }
+
     wsApi.subscribeToAgent(agent.id)
     wsApi.capturePane(agent.id).then((data) => {
       if (!disposed && data) {
-        terminal.write(data)
-        fitAddon.fit()
-        const { cols, rows } = terminal
-        wsApi.resizePtyForRedraw(agent.id, cols, rows)
+        terminal.write(data, () => {
+          if (disposed) return
+          fitAddon.fit()
+          const { cols, rows } = terminal
+          wsApi.resizePtyForRedraw(agent.id, cols, rows)
+          scrollDown()
+        })
       }
     })
 
