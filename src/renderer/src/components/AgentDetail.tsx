@@ -1,7 +1,6 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
 import { useAgentStore } from '../store/agentStore'
 import { StatusBadge } from './StatusBadge'
-import { CompanionInput } from './CompanionInput'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
@@ -29,9 +28,11 @@ export function AgentDetail() {
     return () => clearInterval(interval)
   }, [])
 
-  // Initialize terminal
+  // Single effect: create terminal, load buffer, subscribe to live data
   useEffect(() => {
     if (!termRef.current || !agent) return
+
+    let disposed = false
 
     const terminal = new Terminal({
       theme: {
@@ -59,7 +60,7 @@ export function AgentDetail() {
       fontSize: 13,
       fontFamily: "'SF Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace",
       cursorBlink: true,
-      scrollback: 10000,
+      scrollback: 50000,
       allowProposedApi: true
     })
 
@@ -67,7 +68,6 @@ export function AgentDetail() {
     terminal.loadAddon(fitAddon)
 
     terminal.open(termRef.current)
-    fitAddon.fit()
 
     terminalRef.current = terminal
     fitAddonRef.current = fitAddon
@@ -77,10 +77,14 @@ export function AgentDetail() {
       window.api.writePty(agent.id, data)
     })
 
-    // Handle resize
+    // Handle resize — sync PTY dimensions with terminal
     terminal.onResize(({ cols, rows }) => {
       window.api.resizePty(agent.id, cols, rows)
     })
+
+    // Initial fit + send size to PTY
+    fitAddon.fit()
+    window.api.resizePty(agent.id, terminal.cols, terminal.rows)
 
     // Observe container resize
     const resizeObserver = new ResizeObserver(() => {
@@ -88,7 +92,72 @@ export function AgentDetail() {
     })
     resizeObserver.observe(termRef.current)
 
+    // Subscribe to live PTY data, queuing until buffer is fully rendered
+    const pendingWrites: string[] = []
+    let bufferRendered = false
+
+    const unsubPty = window.api.onPtyData(({ agentId, data }) => {
+      if (agentId !== agent.id || disposed) return
+
+      if (bufferRendered) {
+        terminal.write(data)
+      } else {
+        pendingWrites.push(data)
+      }
+    })
+
+    const scrollDown = (): void => {
+      // xterm renders asynchronously over multiple frames for large writes.
+      // Fire scrollToBottom repeatedly to catch whenever rendering completes.
+      terminal.scrollToBottom()
+      terminal.focus()
+      requestAnimationFrame(() => { if (!disposed) terminal.scrollToBottom() })
+      setTimeout(() => { if (!disposed) terminal.scrollToBottom() }, 50)
+      setTimeout(() => { if (!disposed) terminal.scrollToBottom() }, 150)
+      setTimeout(() => { if (!disposed) terminal.scrollToBottom() }, 300)
+    }
+
+    const flushPending = (): void => {
+      bufferRendered = true
+      if (pendingWrites.length > 0) {
+        const queued = pendingWrites.join('')
+        pendingWrites.length = 0
+        terminal.write(queued, scrollDown)
+      } else {
+        scrollDown()
+      }
+    }
+
+    // Load the output buffer (catches data from before this view opened),
+    // write it, then flush queued live data. With tmux, scrollback is
+    // handled natively by tmux (history-limit 50000).
+    window.api.getOutputBuffer(agent.id).then(({ data, totalLength }) => {
+      if (disposed) return
+
+      if (data && data.length > 0) {
+        terminal.write(data, () => {
+          if (disposed) return
+          scrollDown()
+          flushPending()
+        })
+      } else {
+        if (totalLength === 0 && ['killed', 'done', 'error'].includes(agent.status)) {
+          terminal.write(
+            '\x1b[90m Session output not available (restored from previous app session).\r\n' +
+            ' Use Import Session to reconnect.\x1b[0m\r\n'
+          )
+        }
+        flushPending()
+      }
+    }).catch((err) => {
+      if (disposed) return
+      console.error('[AgentDetail] Failed to load output buffer:', err)
+      flushPending()
+    })
+
     return () => {
+      disposed = true
+      unsubPty()
       resizeObserver.disconnect()
       terminal.dispose()
       terminalRef.current = null
@@ -96,18 +165,29 @@ export function AgentDetail() {
     }
   }, [agent?.id])
 
-  // Subscribe to PTY data for this agent
-  useEffect(() => {
+  // Inline rename
+  const [renaming, setRenaming] = useState(false)
+  const [renameDraft, setRenameDraft] = useState('')
+  const renameRef = useRef<HTMLInputElement>(null)
+
+  // Reset rename state when agent changes
+  useEffect(() => { setRenaming(false) }, [agent?.id])
+
+  const startRename = useCallback(() => {
     if (!agent) return
+    setRenameDraft(agent.name)
+    setRenaming(true)
+    setTimeout(() => renameRef.current?.select(), 0)
+  }, [agent?.name])
 
-    const unsub = window.api.onPtyData(({ agentId, data }) => {
-      if (agentId === agent.id && terminalRef.current) {
-        terminalRef.current.write(data)
-      }
-    })
-
-    return unsub
-  }, [agent?.id])
+  const commitRename = useCallback(() => {
+    if (!agent) return
+    const trimmed = renameDraft.trim()
+    if (trimmed && trimmed !== agent.name) {
+      window.api.renameAgent(agent.id, trimmed)
+    }
+    setRenaming(false)
+  }, [agent?.id, agent?.name, renameDraft])
 
   const handleKill = useCallback(() => {
     if (agent) window.api.killAgent(agent.id)
@@ -120,6 +200,10 @@ export function AgentDetail() {
   const handleRemoteControl = useCallback(() => {
     if (agent) window.api.enableRemoteControl(agent.id)
   }, [agent?.id])
+
+  const handleTable = useCallback(() => {
+    if (agent) window.api.tableAgent(agent.id, !agent.isTabled)
+  }, [agent?.id, agent?.isTabled])
 
   if (!agent) {
     return (
@@ -141,9 +225,28 @@ export function AgentDetail() {
       <div className="px-4 py-3 border-b border-border flex items-center justify-between shrink-0">
         <div className="min-w-0 mr-4">
           <div className="flex items-center gap-2 mb-0.5">
-            <h2 className="text-sm font-semibold text-text-primary truncate">
-              {agent.name}
-            </h2>
+            {renaming ? (
+              <input
+                ref={renameRef}
+                value={renameDraft}
+                onChange={(e) => setRenameDraft(e.target.value)}
+                onBlur={commitRename}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') commitRename()
+                  if (e.key === 'Escape') setRenaming(false)
+                }}
+                className="text-sm font-semibold text-text-primary bg-surface-2 border border-border-focus rounded px-1.5 py-0.5 outline-none min-w-0"
+              />
+            ) : (
+              <h2
+                className="text-sm font-semibold text-text-primary truncate cursor-pointer hover:text-accent transition-colors"
+                style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+                onDoubleClick={(e) => { e.preventDefault(); e.stopPropagation(); startRename() }}
+                title="Double-click to rename"
+              >
+                {agent.name}
+              </h2>
+            )}
             <StatusBadge status={agent.status} />
             {agent.remoteControlUrl && (
               <span
@@ -164,6 +267,13 @@ export function AgentDetail() {
         </div>
 
         <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            onClick={handleTable}
+            className="px-2 py-1 text-xs text-text-secondary hover:text-text-primary border border-border hover:border-text-muted/50 rounded-md transition-colors"
+            title={agent.isTabled ? 'Move back to inbox' : 'Table this agent'}
+          >
+            {agent.isTabled ? 'Untable' : 'Table'}
+          </button>
           {!agent.remoteControlUrl && isActive && (
             <button
               onClick={handleRemoteControl}
@@ -196,9 +306,6 @@ export function AgentDetail() {
       <div className="flex-1 min-h-0 overflow-hidden">
         <div ref={termRef} className="xterm-container" />
       </div>
-
-      {/* Companion input */}
-      <CompanionInput agentId={agent.id} isActive={isActive} />
 
       {/* Footer stats */}
       <div className="px-4 py-1.5 border-t border-border flex items-center gap-4 text-[10px] text-text-muted shrink-0">

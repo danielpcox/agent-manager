@@ -24,11 +24,52 @@ const viewNavItems: { key: AppView; label: string; icon: string }[] = [
   { key: 'btop', label: 'System', icon: '\u2630' }
 ]
 
+function AgentRow({
+  agent,
+  isSelected,
+  tabled,
+  onClick
+}: {
+  agent: { id: string; name: string; status: string; isUnread: boolean; isTabled: boolean; updatedAt: number }
+  isSelected: boolean
+  tabled: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`w-full text-left px-2.5 py-2 rounded-lg mb-0.5 transition-colors ${
+        isSelected
+          ? 'bg-surface-3'
+          : 'hover:bg-surface-2'
+      }`}
+    >
+      <div className="flex items-center justify-between mb-0.5">
+        <span className={`text-[13px] font-medium truncate mr-1 ${tabled ? 'text-text-muted' : 'text-text-primary'}`}>
+          {agent.name}
+        </span>
+        {!tabled && agent.isUnread && (
+          <span className="w-1.5 h-1.5 rounded-full bg-accent shrink-0" />
+        )}
+      </div>
+      <div className="flex items-center justify-between">
+        {!tabled && <StatusBadge status={agent.status as import('../types/agent').AgentStatus} />}
+        {tabled && <span className="text-[10px] text-text-muted">tabled</span>}
+        <span className="text-[10px] text-text-muted">
+          {timeAgo(agent.updatedAt)}
+        </span>
+      </div>
+    </button>
+  )
+}
+
 export function Sidebar({ onNewAgent, currentView, onViewChange }: SidebarProps) {
   const { agents, selectedAgentId, selectAgent, markRead, attentionCount } =
     useAgentStore()
 
   const sorted = [...agents].sort((a, b) => b.updatedAt - a.updatedAt)
+  const active = sorted.filter((a) => !a.isTabled)
+  const tabled = sorted.filter((a) => a.isTabled)
   const attention = attentionCount()
 
   const handleSelect = (agentId: string) => {
@@ -86,32 +127,34 @@ export function Sidebar({ onNewAgent, currentView, onViewChange }: SidebarProps)
             Click + to create one.
           </div>
         ) : (
-          sorted.map((agent) => (
-            <button
-              key={agent.id}
-              onClick={() => handleSelect(agent.id)}
-              className={`w-full text-left px-2.5 py-2 rounded-lg mb-0.5 transition-colors ${
-                selectedAgentId === agent.id && currentView === 'agents'
-                  ? 'bg-surface-3'
-                  : 'hover:bg-surface-2'
-              }`}
-            >
-              <div className="flex items-center justify-between mb-0.5">
-                <span className="text-[13px] font-medium text-text-primary truncate mr-1">
-                  {agent.name}
-                </span>
-                {agent.isUnread && (
-                  <span className="w-1.5 h-1.5 rounded-full bg-accent shrink-0" />
-                )}
-              </div>
-              <div className="flex items-center justify-between">
-                <StatusBadge status={agent.status} />
-                <span className="text-[10px] text-text-muted">
-                  {timeAgo(agent.updatedAt)}
-                </span>
-              </div>
-            </button>
-          ))
+          <>
+            {active.map((agent) => (
+              <AgentRow
+                key={agent.id}
+                agent={agent}
+                isSelected={selectedAgentId === agent.id && currentView === 'agents'}
+                tabled={false}
+                onClick={() => handleSelect(agent.id)}
+              />
+            ))}
+            {tabled.length > 0 && (
+              <>
+                <div className="border-t border-border my-2 mx-1" />
+                <div className="px-2 pb-1 text-[10px] text-text-muted uppercase tracking-wider font-semibold">
+                  Tabled
+                </div>
+                {tabled.map((agent) => (
+                  <AgentRow
+                    key={agent.id}
+                    agent={agent}
+                    isSelected={selectedAgentId === agent.id && currentView === 'agents'}
+                    tabled={true}
+                    onClick={() => handleSelect(agent.id)}
+                  />
+                ))}
+              </>
+            )}
+          </>
         )}
       </div>
     </div>

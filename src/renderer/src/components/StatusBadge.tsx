@@ -17,12 +17,13 @@ const statusConfig: Record<
     animate: true
   },
   waiting: {
-    label: 'Waiting',
+    label: 'Wants Input',
     color: 'text-status-waiting',
-    dotClass: 'bg-status-waiting'
+    dotClass: 'bg-status-waiting',
+    animate: true
   },
   done: {
-    label: 'Done',
+    label: 'Finished',
     color: 'text-status-done',
     dotClass: 'bg-status-done'
   },

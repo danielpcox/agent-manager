@@ -1,15 +1,16 @@
+import { useEffect, useState } from 'react'
 import type { Agent } from '../types/agent'
 import { StatusBadge } from './StatusBadge'
 import { useAgentStore } from '../store/agentStore'
 
-function timeAgo(timestamp: number): string {
-  const seconds = Math.floor((Date.now() - timestamp) / 1000)
-  if (seconds < 60) return 'just now'
+function formatDuration(ms: number): string {
+  const seconds = Math.floor(ms / 1000)
+  if (seconds < 60) return `${seconds}s`
   const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes}m`
+  const secs = seconds % 60
+  if (minutes < 60) return `${minutes}m ${secs}s`
   const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h`
-  return `${Math.floor(hours / 24)}d`
+  return `${hours}h ${minutes % 60}m`
 }
 
 function truncateDir(dir: string): string {
@@ -23,12 +24,45 @@ function truncateDir(dir: string): string {
 interface InboxCardProps {
   agent: Agent
   onClick: () => void
+  tabled?: boolean
 }
 
-export function InboxCard({ agent, onClick }: InboxCardProps) {
+export function InboxCard({ agent, onClick, tabled }: InboxCardProps) {
   const selectedAgentId = useAgentStore((s) => s.selectedAgentId)
   const isSelected = selectedAgentId === agent.id
-  const isAttention = agent.status === 'waiting' || agent.status === 'error'
+  const isAttention = !tabled && (agent.status === 'waiting' || agent.status === 'error')
+  const isActive = ['running', 'starting', 'waiting'].includes(agent.status)
+
+  // Tick for live timer updates
+  const [, setTick] = useState(0)
+  useEffect(() => {
+    if (!isActive) return
+    const interval = setInterval(() => setTick((t) => t + 1), 1000)
+    return () => clearInterval(interval)
+  }, [isActive])
+
+  // Calculate display time
+  const runningTimeMs = agent.runningTimeMs || 0
+  const statusChangedAt = agent.statusChangedAt || agent.createdAt
+
+  let timerLabel: string
+  let timerTitle: string
+  if (agent.status === 'running' || agent.status === 'starting') {
+    // Currently running: accumulated + current stint
+    const currentStint = Date.now() - statusChangedAt
+    const totalRunning = runningTimeMs + currentStint
+    timerLabel = formatDuration(totalRunning)
+    timerTitle = 'Total running time'
+  } else if (agent.status === 'waiting') {
+    // Waiting: show how long waiting, with running time in tooltip
+    const waitTime = Date.now() - statusChangedAt
+    timerLabel = `${formatDuration(waitTime)} waiting`
+    timerTitle = `Waiting for input (ran for ${formatDuration(runningTimeMs)})`
+  } else {
+    // Done/error/killed: show total running time
+    timerLabel = formatDuration(runningTimeMs)
+    timerTitle = 'Total running time'
+  }
 
   return (
     <button
@@ -43,19 +77,21 @@ export function InboxCard({ agent, onClick }: InboxCardProps) {
     >
       <div className="flex items-start justify-between mb-1.5">
         <div className="flex items-center gap-2 min-w-0">
-          <span className="text-sm font-medium text-text-primary truncate">
+          <span className={`text-sm font-medium truncate ${tabled ? 'text-text-muted' : 'text-text-primary'}`}>
             {agent.name}
           </span>
-          {agent.isUnread && (
+          {!tabled && agent.isUnread && (
             <span className="w-1.5 h-1.5 rounded-full bg-accent shrink-0" />
           )}
         </div>
         <div className="flex items-center gap-2 shrink-0 ml-2">
-          <StatusBadge status={agent.status} />
+          {tabled
+            ? <span className="text-[10px] text-text-muted">tabled</span>
+            : <StatusBadge status={agent.status} />}
         </div>
       </div>
 
-      <p className="text-xs text-text-secondary line-clamp-2 mb-2">
+      <p className={`text-xs line-clamp-2 mb-2 ${tabled ? 'text-text-muted' : 'text-text-secondary'}`}>
         {agent.task}
       </p>
 
@@ -68,7 +104,7 @@ export function InboxCard({ agent, onClick }: InboxCardProps) {
           {agent.remoteControlUrl && (
             <span title="Remote Control active">RC</span>
           )}
-          <span>{timeAgo(agent.updatedAt)}</span>
+          <span title={timerTitle}>{timerLabel}</span>
         </div>
       </div>
     </button>

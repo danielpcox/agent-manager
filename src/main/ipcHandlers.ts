@@ -3,7 +3,6 @@ import * as pty from 'node-pty'
 import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
-import * as readline from 'readline'
 import { AgentManager } from './agentManager'
 
 interface SessionInfo {
@@ -15,36 +14,85 @@ interface SessionInfo {
 }
 
 function decodeClaudeProjectPath(encoded: string): string {
-  // Claude encodes paths by replacing '/' with '-' and prepending '-'
-  // e.g. /Users/danielpcox/projects/agent-manager -> -Users-danielpcox-projects-agent-manager
-  // This is lossy (real hyphens are indistinguishable from separators).
-  // We try the naive decode first, then walk the filesystem to find the real path.
+  // Claude encodes paths: '/' -> '-', '_' -> '-', prepend '-'
+  // e.g. /Users/dan/projects/haze_map -> -Users-dan-projects-haze-map
+  // This is lossy, so we walk the filesystem trying variants.
   const stripped = encoded.replace(/^-/, '')
   const parts = stripped.split('-')
 
-  // Greedily reconstruct the path by checking which segments exist
   let resolved = '/'
   let i = 0
   while (i < parts.length) {
-    // Try increasingly longer hyphenated segments
     let found = false
+    // Try increasingly longer hyphenated segments
     for (let j = parts.length; j > i; j--) {
-      const candidate = parts.slice(i, j).join('-')
-      const testPath = path.join(resolved, candidate)
-      if (fs.existsSync(testPath)) {
-        resolved = testPath
-        i = j
-        found = true
-        break
+      const segment = parts.slice(i, j).join('-')
+      // Try the segment as-is, then with underscores replacing hyphens
+      const variants = [segment]
+      if (segment.includes('-')) {
+        variants.push(segment.replace(/-/g, '_'))
       }
+      for (const variant of variants) {
+        const testPath = path.join(resolved, variant)
+        if (fs.existsSync(testPath)) {
+          resolved = testPath
+          i = j
+          found = true
+          break
+        }
+      }
+      if (found) break
     }
     if (!found) {
-      // Fallback: just use the single part
       resolved = path.join(resolved, parts[i])
       i++
     }
   }
   return resolved
+}
+
+function extractSessionMeta(filePath: string): { summary: string; timestamp: string; cwd: string | null } | null {
+  // Read the first ~20KB synchronously — enough to find cwd and first user message
+  const fd = fs.openSync(filePath, 'r')
+  const buf = Buffer.alloc(20480)
+  const bytesRead = fs.readSync(fd, buf, 0, buf.length, 0)
+  fs.closeSync(fd)
+
+  const chunk = buf.toString('utf-8', 0, bytesRead)
+  const lines = chunk.split('\n')
+
+  let cwd: string | null = null
+
+  for (const line of lines) {
+    if (!line.trim()) continue
+    try {
+      const d = JSON.parse(line)
+      // Grab cwd from the first message that has it
+      if (!cwd && d.cwd) {
+        cwd = d.cwd
+      }
+      if (d.type === 'user' && !d.isMeta) {
+        const content = d.message?.content
+        let summary = ''
+        if (typeof content === 'string') {
+          summary = content.substring(0, 150)
+        } else if (Array.isArray(content)) {
+          for (const block of content) {
+            if (block?.type === 'text') {
+              summary = block.text.substring(0, 150)
+              break
+            }
+          }
+        }
+        if (summary) {
+          return { summary, timestamp: d.timestamp || '', cwd }
+        }
+      }
+    } catch {
+      continue
+    }
+  }
+  return null
 }
 
 async function listClaudeSessions(): Promise<SessionInfo[]> {
@@ -58,58 +106,33 @@ async function listClaudeSessions(): Promise<SessionInfo[]> {
     if (!projDir.isDirectory()) continue
 
     const projPath = path.join(base, projDir.name)
-    const realPath = decodeClaудеProjectPath(projDir.name)
-    const files = fs.readdirSync(projPath).filter((f) => f.endsWith('.jsonl'))
+    const fallbackPath = decodeClaudeProjectPath(projDir.name)
+
+    let files: string[]
+    try {
+      files = fs.readdirSync(projPath).filter((f) => f.endsWith('.jsonl'))
+    } catch {
+      continue
+    }
 
     for (const file of files) {
-      const sessionId = file.replace('.jsonl', '')
-      const filePath = path.join(projPath, file)
-      const stat = fs.statSync(filePath)
-
-      let summary = ''
-      let timestamp = ''
-
       try {
-        const stream = fs.createReadStream(filePath, { encoding: 'utf-8' })
-        const rl = readline.createInterface({ input: stream })
+        const sessionId = file.replace('.jsonl', '')
+        const filePath = path.join(projPath, file)
+        const stat = fs.statSync(filePath)
 
-        for await (const line of rl) {
-          try {
-            const d = JSON.parse(line)
-            if (d.type === 'user' && !d.isMeta) {
-              const content = d.message?.content
-              if (typeof content === 'string') {
-                summary = content.substring(0, 150)
-              } else if (Array.isArray(content)) {
-                for (const block of content) {
-                  if (block?.type === 'text') {
-                    summary = block.text.substring(0, 150)
-                    break
-                  }
-                }
-              }
-              timestamp = d.timestamp || ''
-              break
-            }
-          } catch {
-            continue
-          }
+        const result = extractSessionMeta(filePath)
+        if (result) {
+          sessions.push({
+            sessionId,
+            project: result.cwd || fallbackPath,
+            summary: result.summary,
+            timestamp: result.timestamp,
+            mtime: stat.mtimeMs
+          })
         }
-
-        rl.close()
-        stream.destroy()
       } catch {
         continue
-      }
-
-      if (summary) {
-        sessions.push({
-          sessionId,
-          project: realPath,
-          summary,
-          timestamp,
-          mtime: stat.mtimeMs
-        })
       }
     }
   }
@@ -165,12 +188,24 @@ export function registerIpcHandlers(agentManager: AgentManager): void {
     agentManager.markRead(agentId)
   })
 
+  ipcMain.handle('agent:rename', async (_event, { agentId, name }) => {
+    agentManager.renameAgent(agentId, name)
+  })
+
+  ipcMain.handle('agent:table', async (_event, { agentId, tabled }) => {
+    agentManager.tableAgent(agentId, tabled)
+  })
+
   ipcMain.handle('agent:getAll', async () => {
     return agentManager.getAllAgents()
   })
 
   ipcMain.handle('agent:get', async (_event, { agentId }) => {
     return agentManager.getAgent(agentId)
+  })
+
+  ipcMain.handle('agent:getOutputBuffer', async (_event, { agentId, offset, length }) => {
+    return agentManager.getOutputBuffer(agentId, offset, length)
   })
 
   ipcMain.handle('sessions:list', async () => {

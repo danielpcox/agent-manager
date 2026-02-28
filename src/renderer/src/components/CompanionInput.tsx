@@ -82,7 +82,7 @@ export function CompanionInput({ agentId, isActive }: CompanionInputProps) {
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      if (e.key === 'Enter' && e.metaKey) {
+      if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault()
         handleSend()
       }
@@ -157,7 +157,7 @@ export function CompanionInput({ agentId, isActive }: CompanionInputProps) {
       </div>
 
       <div className="text-[10px] text-text-muted mt-1 text-right">
-        Cmd+Enter to send &middot; Cmd+V to paste screenshot
+        Enter to send &middot; Shift+Enter for newline &middot; Cmd+V to paste screenshot
       </div>
     </div>
   )

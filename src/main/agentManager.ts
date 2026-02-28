@@ -1,5 +1,6 @@
 import { BrowserWindow } from 'electron'
 import * as pty from 'node-pty'
+import { execSync } from 'child_process'
 import { v4 as uuidv4 } from 'uuid'
 import * as path from 'path'
 import * as os from 'os'
@@ -15,10 +16,14 @@ import type {
 
 const SCREENSHOT_DIR = path.join(os.tmpdir(), 'agent-manager-screenshots')
 
+const MAX_BUFFER = 5 * 1024 * 1024 // 5MB max per agent
+
 interface ManagedAgent {
   agent: Agent
   pty: pty.IPty | null
   outputBuffer: string
+  tmuxSession: string
+  idleTimer: ReturnType<typeof setTimeout> | null
 }
 
 export class AgentManager {
@@ -31,7 +36,42 @@ export class AgentManager {
   }
 
   private send(channel: string, data: unknown): void {
-    this.window?.webContents.send(channel, data)
+    if (this.window && !this.window.isDestroyed()) {
+      this.window.webContents.send(channel, data)
+    }
+  }
+
+  // --- tmux helpers ---
+
+  private tmuxSessionName(agentId: string): string {
+    // tmux session names: use = prefix for exact match to avoid substring issues
+    return `am_${agentId.replace(/-/g, '')}`
+  }
+
+  private tmuxSessionExists(name: string): boolean {
+    try {
+      execSync(`tmux has-session -t '=${name}' 2>/dev/null`)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  private killTmuxSession(name: string): void {
+    try {
+      execSync(`tmux kill-session -t '=${name}' 2>/dev/null`)
+    } catch {
+      // session may already be gone
+    }
+  }
+
+  static checkTmuxAvailable(): boolean {
+    try {
+      execSync('which tmux')
+      return true
+    } catch {
+      return false
+    }
   }
 
   private generateName(task: string): string {
@@ -95,13 +135,16 @@ export class AgentManager {
       remoteControlUrl: null,
       createdAt: now,
       updatedAt: now,
+      statusChangedAt: now,
+      runningTimeMs: 0,
       totalCostUsd: 0,
       turns: 0,
       isUnread: false,
+      isTabled: false,
       events: []
     }
 
-    const managed: ManagedAgent = { agent, pty: null, outputBuffer: '' }
+    const managed: ManagedAgent = { agent, pty: null, outputBuffer: '', tmuxSession: this.tmuxSessionName(id), idleTimer: null }
     this.agents.set(id, managed)
     this.send('agent:created', agent)
     this.onChanged?.()
@@ -134,13 +177,16 @@ export class AgentManager {
       remoteControlUrl: null,
       createdAt: now,
       updatedAt: now,
+      statusChangedAt: now,
+      runningTimeMs: 0,
       totalCostUsd: 0,
       turns: 0,
       isUnread: false,
+      isTabled: false,
       events: []
     }
 
-    const managed: ManagedAgent = { agent, pty: null, outputBuffer: '' }
+    const managed: ManagedAgent = { agent, pty: null, outputBuffer: '', tmuxSession: this.tmuxSessionName(id), idleTimer: null }
     this.agents.set(id, managed)
     this.send('agent:created', agent)
     this.onChanged?.()
@@ -176,11 +222,18 @@ export class AgentManager {
       claudeCmd += ` --model ${agent.model}`
     }
 
+    const cols = 120
+    const rows = 40
+    const sess = managed.tmuxSession
+
+    // Create tmux session for imported/resumed agent
+    const tmuxCmd = `tmux new-session -d -s ${sess} -x ${cols} -y ${rows} '${shell} -l -c "${claudeCmd.replace(/'/g, "'\\''")}"' \\; set-option -t ${sess} history-limit 50000 && tmux attach-session -t ${sess}`
+
     try {
-      const ptyProcess = pty.spawn(shell, ['-l', '-c', claudeCmd], {
+      const ptyProcess = pty.spawn(shell, ['-l', '-c', tmuxCmd], {
         name: 'xterm-256color',
-        cols: 120,
-        rows: 40,
+        cols,
+        rows,
         cwd: agent.workdir,
         env: {
           ...process.env,
@@ -193,14 +246,13 @@ export class AgentManager {
 
       let buffer = ''
 
-      console.log(`[AgentManager] Import PTY spawned: ${claudeCmd} (cwd: ${agent.workdir})`)
+      console.log(`[AgentManager] Import PTY spawned via tmux (${sess}): ${claudeCmd} (cwd: ${agent.workdir})`)
 
       ptyProcess.onData((data: string) => {
         buffer += data
         managed.outputBuffer += data
-        // Keep buffer from growing unbounded
-        if (managed.outputBuffer.length > 10000) {
-          managed.outputBuffer = managed.outputBuffer.slice(-5000)
+        if (managed.outputBuffer.length > MAX_BUFFER) {
+          managed.outputBuffer = managed.outputBuffer.slice(-MAX_BUFFER / 2)
         }
         this.send('agent:ptyData', { agentId: agent.id, data })
         this.detectSessionInfo(agent, buffer)
@@ -210,19 +262,7 @@ export class AgentManager {
       })
 
       ptyProcess.onExit(({ exitCode }) => {
-        console.log(`[AgentManager] Import PTY exited: code=${exitCode}, agent="${agent.name}"`)
-        const newStatus: AgentStatus = exitCode === 0 ? 'done' : 'error'
-        if (exitCode !== 0) {
-          const lastOutput = managed.outputBuffer.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').trim()
-          console.log(`[AgentManager] Last output for "${agent.name}":\n${lastOutput.slice(-2000)}`)
-          this.addEvent(agent, {
-            type: 'error',
-            content: `Process exited with code ${exitCode}. Last output:\n${lastOutput.slice(-500)}`,
-            isError: true
-          })
-        }
-        this.updateStatus(managed, newStatus)
-        managed.pty = null
+        this.handleTmuxClientExit(managed, exitCode)
       })
 
       this.updateStatus(managed, 'running')
@@ -239,16 +279,20 @@ export class AgentManager {
 
   private spawnPty(managed: ManagedAgent): void {
     const { agent } = managed
-    const claudePath = 'claude'
-    const args = this.buildClaudeArgs(agent)
+    const claudeArgs = this.buildClaudeArgs(agent)
+    const claudeCmd = `claude ${claudeArgs.join(' ')}`
 
-    // Determine shell for proper env inheritance
     const shell = process.env.SHELL || '/bin/zsh'
     const cols = 120
     const rows = 40
+    const sess = managed.tmuxSession
+
+    // Create a tmux session running claude, then attach to it
+    // The tmux session name is deterministic from the agent ID
+    const tmuxCmd = `tmux new-session -d -s ${sess} -x ${cols} -y ${rows} '${shell} -l -c "${claudeCmd.replace(/'/g, "'\\''")}"' \\; set-option -t ${sess} history-limit 50000 && tmux attach-session -t ${sess}`
 
     try {
-      const ptyProcess = pty.spawn(shell, ['-l', '-c', `${claudePath} ${args.join(' ')}`], {
+      const ptyProcess = pty.spawn(shell, ['-l', '-c', tmuxCmd], {
         name: 'xterm-256color',
         cols,
         rows,
@@ -261,45 +305,25 @@ export class AgentManager {
       })
 
       managed.pty = ptyProcess
-      console.log(`[AgentManager] PTY spawned: claude ${args.join(' ')} (cwd: ${agent.workdir})`)
+      console.log(`[AgentManager] PTY spawned via tmux (${sess}): ${claudeCmd} (cwd: ${agent.workdir})`)
 
       let buffer = ''
 
       ptyProcess.onData((data: string) => {
         buffer += data
         managed.outputBuffer += data
-        // Keep buffer from growing unbounded
-        if (managed.outputBuffer.length > 10000) {
-          managed.outputBuffer = managed.outputBuffer.slice(-5000)
+        if (managed.outputBuffer.length > MAX_BUFFER) {
+          managed.outputBuffer = managed.outputBuffer.slice(-MAX_BUFFER / 2)
         }
         this.send('agent:ptyData', { agentId: agent.id, data })
-
-        // Detect session ID from output (look for common patterns)
         this.detectSessionInfo(agent, buffer)
-
-        // Detect remote control URL
         this.detectRemoteControlUrl(agent, data)
-
-        // Update status based on output patterns
         this.detectStatus(managed, data)
-
         agent.updatedAt = Date.now()
       })
 
       ptyProcess.onExit(({ exitCode }) => {
-        console.log(`[AgentManager] PTY exited: code=${exitCode}, agent="${agent.name}"`)
-        const newStatus: AgentStatus = exitCode === 0 ? 'done' : 'error'
-        if (exitCode !== 0) {
-          const lastOutput = managed.outputBuffer.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').trim()
-          console.log(`[AgentManager] Last output for "${agent.name}":\n${lastOutput.slice(-2000)}`)
-          this.addEvent(agent, {
-            type: 'error',
-            content: `Process exited with code ${exitCode}. Last output:\n${lastOutput.slice(-500)}`,
-            isError: true
-          })
-        }
-        this.updateStatus(managed, newStatus)
-        managed.pty = null
+        this.handleTmuxClientExit(managed, exitCode)
       })
 
       this.updateStatus(managed, 'running')
@@ -307,7 +331,6 @@ export class AgentManager {
       // Send the initial task after a short delay for the shell to initialize
       setTimeout(() => {
         if (managed.pty) {
-          // Type the task as the first message
           ptyProcess.write(agent.task + '\r')
           this.addEvent(agent, {
             type: 'user_message',
@@ -344,28 +367,126 @@ export class AgentManager {
   }
 
   private detectStatus(managed: ManagedAgent, data: string): void {
-    const stripped = data.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').trim()
+    const stripped = data.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '').replace(/\x1b\][^\x07]*\x07/g, '')
 
-    // Detect when Claude is waiting for user input (the prompt character)
-    if (stripped.match(/^[❯>]\s*$/m)) {
-      // Only mark waiting if we were previously running
-      if (managed.agent.status === 'running') {
-        managed.agent.isUnread = true
-        this.updateStatus(managed, 'waiting')
+    // The ✻ activity line (e.g. "✻ Thinking… (5s · ↑ 1.2k tokens)")
+    // is the definitive signal that Claude is actively working
+    if (/✻/.test(stripped)) {
+      if (managed.agent.status !== 'running') {
+        this.updateStatus(managed, 'running')
       }
     }
 
-    // Detect when Claude is actively working again
-    if (stripped.includes('Thinking') || stripped.includes('⠋') || stripped.includes('⠙')) {
-      if (managed.agent.status === 'waiting') {
-        this.updateStatus(managed, 'running')
-      }
+    // Reset idle timer — when data stops flowing, check if still working
+    if (managed.idleTimer) clearTimeout(managed.idleTimer)
+    managed.idleTimer = setTimeout(() => {
+      this.checkIfWaiting(managed)
+    }, 3000)
+  }
+
+  private checkIfWaiting(managed: ManagedAgent): void {
+    if (managed.agent.status !== 'running') return
+
+    // Data stopped flowing for 3s. The ✻ activity line only appears while
+    // Claude is actively working (thinking, reading, writing, etc.) and
+    // animates continuously, producing data. So if data stopped AND we
+    // don't see ✻ anymore, Claude is done and waiting at the prompt.
+    //
+    // We could also use tmux capture-pane for a clean read of the current
+    // screen, but checking the buffer tail is simpler and sufficient.
+    this.updateStatus(managed, 'waiting')
+  }
+
+  private handleTmuxClientExit(managed: ManagedAgent, exitCode: number): void {
+    const { agent } = managed
+    managed.pty = null
+    if (managed.idleTimer) { clearTimeout(managed.idleTimer); managed.idleTimer = null }
+
+    // Check if the tmux session is still alive (claude still running)
+    if (this.tmuxSessionExists(managed.tmuxSession)) {
+      // tmux client detached but session lives on — just a detach, not a real exit
+      console.log(`[AgentManager] tmux client detached for "${agent.name}" (session ${managed.tmuxSession} still alive)`)
+      // Don't change status — agent is still running in tmux
+      return
+    }
+
+    // tmux session is gone — claude actually exited
+    console.log(`[AgentManager] PTY exited: code=${exitCode}, agent="${agent.name}" (tmux session gone)`)
+    const newStatus: AgentStatus = exitCode === 0 ? 'done' : 'error'
+    if (exitCode !== 0) {
+      const lastOutput = managed.outputBuffer.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').trim()
+      console.log(`[AgentManager] Last output for "${agent.name}":\n${lastOutput.slice(-2000)}`)
+      this.addEvent(agent, {
+        type: 'error',
+        content: `Process exited with code ${exitCode}. Last output:\n${lastOutput.slice(-500)}`,
+        isError: true
+      })
+    }
+    this.updateStatus(managed, newStatus)
+  }
+
+  private reattachToTmux(managed: ManagedAgent): void {
+    const { agent } = managed
+    const shell = process.env.SHELL || '/bin/zsh'
+    const sess = managed.tmuxSession
+    const cols = 120
+    const rows = 40
+
+    try {
+      const ptyProcess = pty.spawn(shell, ['-l', '-c', `tmux attach-session -t ${sess}`], {
+        name: 'xterm-256color',
+        cols,
+        rows,
+        cwd: agent.workdir,
+        env: {
+          ...process.env,
+          TERM: 'xterm-256color',
+          COLORTERM: 'truecolor'
+        } as Record<string, string>
+      })
+
+      managed.pty = ptyProcess
+
+      let buffer = ''
+
+      console.log(`[AgentManager] Reattached to tmux session ${sess} for "${agent.name}"`)
+
+      ptyProcess.onData((data: string) => {
+        buffer += data
+        managed.outputBuffer += data
+        if (managed.outputBuffer.length > MAX_BUFFER) {
+          managed.outputBuffer = managed.outputBuffer.slice(-MAX_BUFFER / 2)
+        }
+        this.send('agent:ptyData', { agentId: agent.id, data })
+        this.detectSessionInfo(agent, buffer)
+        this.detectRemoteControlUrl(agent, data)
+        this.detectStatus(managed, data)
+        agent.updatedAt = Date.now()
+      })
+
+      ptyProcess.onExit(({ exitCode }) => {
+        this.handleTmuxClientExit(managed, exitCode)
+      })
+
+      this.updateStatus(managed, 'running')
+    } catch (err) {
+      console.error(`[AgentManager] Failed to reattach to tmux session ${sess}:`, err)
+      this.updateStatus(managed, 'error')
     }
   }
 
   private updateStatus(managed: ManagedAgent, status: AgentStatus): void {
+    const now = Date.now()
+    const prev = managed.agent.status
+
+    // Accumulate running time when leaving running/starting state
+    if ((prev === 'running' || prev === 'starting') && status !== prev) {
+      managed.agent.runningTimeMs += now - (managed.agent.statusChangedAt || now)
+    }
+
     managed.agent.status = status
-    managed.agent.updatedAt = Date.now()
+    managed.agent.updatedAt = now
+    managed.agent.statusChangedAt = now
     if (status === 'waiting' || status === 'done' || status === 'error') {
       managed.agent.isUnread = true
     }
@@ -455,7 +576,29 @@ export class AgentManager {
       managed.pty.kill()
       managed.pty = null
     }
+    // Kill the tmux session too so claude actually stops
+    this.killTmuxSession(managed.tmuxSession)
     this.updateStatus(managed, 'killed')
+  }
+
+  tableAgent(agentId: string, tabled: boolean): void {
+    const managed = this.agents.get(agentId)
+    if (!managed) return
+
+    managed.agent.isTabled = tabled
+    managed.agent.updatedAt = Date.now()
+    this.send('agent:updated', managed.agent)
+    this.onChanged?.()
+  }
+
+  renameAgent(agentId: string, newName: string): void {
+    const managed = this.agents.get(agentId)
+    if (!managed) return
+
+    managed.agent.name = newName
+    managed.agent.updatedAt = Date.now()
+    this.send('agent:updated', managed.agent)
+    this.onChanged?.()
   }
 
   markRead(agentId: string): void {
@@ -464,6 +607,19 @@ export class AgentManager {
       managed.agent.isUnread = false
       this.send('agent:updated', managed.agent)
     }
+  }
+
+  getOutputBuffer(agentId: string, offset?: number, length?: number): { data: string; totalLength: number } {
+    const managed = this.agents.get(agentId)
+    if (!managed) return { data: '', totalLength: 0 }
+
+    const buf = managed.outputBuffer
+    const total = buf.length
+    const chunkSize = length || 50000 // default ~50KB
+    const start = offset !== undefined ? offset : Math.max(0, total - chunkSize)
+    const end = Math.min(start + chunkSize, total)
+
+    return { data: buf.slice(start, end), totalLength: total }
   }
 
   getAgent(agentId: string): Agent | null {
@@ -475,7 +631,14 @@ export class AgentManager {
   }
 
   removeAgent(agentId: string): void {
-    this.killAgent(agentId)
+    const managed = this.agents.get(agentId)
+    if (managed) {
+      if (managed.pty) {
+        managed.pty.kill()
+        managed.pty = null
+      }
+      this.killTmuxSession(managed.tmuxSession)
+    }
     this.agents.delete(agentId)
     this.send('agent:removed', { agentId })
     this.onChanged?.()
@@ -486,21 +649,49 @@ export class AgentManager {
     return this.getAllAgents()
   }
 
-  // Restore agents from persistence (they won't have active PTYs)
+  // Restore agents from persistence. Check for live tmux sessions first.
   restore(agents: Agent[]): void {
     for (const agent of agents) {
-      // Mark previously-running agents as killed on restore
-      if (agent.status === 'running' || agent.status === 'starting') {
+      // Backfill new fields for agents persisted before these existed
+      if (!agent.statusChangedAt) agent.statusChangedAt = agent.updatedAt || agent.createdAt
+      if (!agent.runningTimeMs) agent.runningTimeMs = 0
+      if (agent.isTabled === undefined) agent.isTabled = false
+
+      const wasActive = ['running', 'starting', 'waiting'].includes(agent.status)
+      const tmuxSession = this.tmuxSessionName(agent.id)
+      const managed: ManagedAgent = { agent, pty: null, outputBuffer: '', tmuxSession, idleTimer: null }
+      this.agents.set(agent.id, managed)
+
+      if (this.tmuxSessionExists(tmuxSession)) {
+        // tmux session still alive — just reattach (full scrollback comes from tmux)
+        console.log(`[AgentManager] Reattaching to live tmux session "${tmuxSession}" for "${agent.name}"`)
+        agent.status = 'starting'
+        this.reattachToTmux(managed)
+      } else if (wasActive && agent.sessionId) {
+        // tmux session dead but has sessionId — resume via --resume in a new tmux session
+        agent.status = 'starting'
+        console.log(`[AgentManager] Resuming session "${agent.sessionId}" for "${agent.name}" (tmux session gone)`)
+        this.spawnPtyForImport(managed, {
+          workdir: agent.workdir,
+          sessionId: agent.sessionId,
+          model: agent.model,
+          permissionMode: agent.permissionMode
+        })
+      } else if (wasActive) {
         agent.status = 'killed'
       }
-      this.agents.set(agent.id, { agent, pty: null, outputBuffer: '' })
+      // done/error/killed agents stay as-is
     }
   }
 
   cleanup(): void {
+    // Only kill PTY handles (tmux clients). The tmux sessions survive
+    // so agents keep running in the background.
     for (const [, managed] of this.agents) {
+      if (managed.idleTimer) { clearTimeout(managed.idleTimer); managed.idleTimer = null }
       if (managed.pty) {
         managed.pty.kill()
+        managed.pty = null
       }
     }
   }

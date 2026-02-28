@@ -19,8 +19,14 @@ const api = {
   killAgent: (agentId: string) => ipcRenderer.invoke('agent:kill', { agentId }),
   removeAgent: (agentId: string) => ipcRenderer.invoke('agent:remove', { agentId }),
   markRead: (agentId: string) => ipcRenderer.invoke('agent:markRead', { agentId }),
+  renameAgent: (agentId: string, name: string) =>
+    ipcRenderer.invoke('agent:rename', { agentId, name }),
+  tableAgent: (agentId: string, tabled: boolean) =>
+    ipcRenderer.invoke('agent:table', { agentId, tabled }),
   getAllAgents: () => ipcRenderer.invoke('agent:getAll'),
   getAgent: (agentId: string) => ipcRenderer.invoke('agent:get', { agentId }),
+  getOutputBuffer: (agentId: string, offset?: number, length?: number) =>
+    ipcRenderer.invoke('agent:getOutputBuffer', { agentId, offset, length }) as Promise<{ data: string; totalLength: number }>,
   selectDirectory: () => ipcRenderer.invoke('dialog:selectDirectory'),
   listSessions: () => ipcRenderer.invoke('sessions:list'),
 

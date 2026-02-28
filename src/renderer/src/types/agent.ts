@@ -39,9 +39,12 @@ export interface Agent {
   remoteControlUrl: string | null
   createdAt: number
   updatedAt: number
+  statusChangedAt: number
+  runningTimeMs: number
   totalCostUsd: number
   turns: number
   isUnread: boolean
+  isTabled: boolean
   events: ConversationEvent[]
 }
 

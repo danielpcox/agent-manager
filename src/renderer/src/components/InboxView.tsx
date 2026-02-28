@@ -1,13 +1,14 @@
+import { useState, useRef, useEffect } from 'react'
 import { useAgentStore } from '../store/agentStore'
 import { InboxCard } from './InboxCard'
 
-type FilterTab = 'all' | 'active' | 'attention' | 'done'
+type FilterTab = 'all' | 'active' | 'attention' | 'tabled'
 
 const tabs: { key: FilterTab; label: string }[] = [
   { key: 'all', label: 'All' },
-  { key: 'active', label: 'Active' },
+  { key: 'active', label: 'Running' },
   { key: 'attention', label: 'Needs Attention' },
-  { key: 'done', label: 'Done' }
+  { key: 'tabled', label: 'Tabled' }
 ]
 
 interface InboxViewProps {
@@ -25,7 +26,38 @@ export function InboxView({ onNewAgent }: InboxViewProps) {
     agents
   } = useAgentStore()
 
-  const visible = filteredAgents()
+  const [searchQuery, setSearchQuery] = useState('')
+  const searchRef = useRef<HTMLInputElement>(null)
+
+  // Cmd+F to focus search
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.metaKey && e.key === 'f') {
+        const tag = (e.target as HTMLElement)?.tagName
+        // Don't steal focus from terminal
+        if (tag !== 'TEXTAREA') {
+          e.preventDefault()
+          searchRef.current?.focus()
+          searchRef.current?.select()
+        }
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [])
+
+  const filtered = filteredAgents()
+  const visible = searchQuery
+    ? filtered.filter((a) => {
+        const q = searchQuery.toLowerCase()
+        return (
+          a.name.toLowerCase().includes(q) ||
+          a.workdir.toLowerCase().includes(q) ||
+          a.task.toLowerCase().includes(q) ||
+          a.model.toLowerCase().includes(q)
+        )
+      })
+    : filtered
   const attention = attentionCount()
 
   const handleSelect = (agentId: string) => {
@@ -52,6 +84,24 @@ export function InboxView({ onNewAgent }: InboxViewProps) {
         >
           + New Agent
         </button>
+      </div>
+
+      {/* Search */}
+      <div className="px-4 pb-2">
+        <input
+          ref={searchRef}
+          type="text"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') {
+              setSearchQuery('')
+              searchRef.current?.blur()
+            }
+          }}
+          placeholder="Search agents..."
+          className="w-full px-2.5 py-1.5 bg-surface-2 border border-border rounded-md text-xs text-text-primary placeholder:text-text-muted outline-none focus:border-border-focus transition-colors"
+        />
       </div>
 
       {/* Filter tabs */}
@@ -83,17 +133,39 @@ export function InboxView({ onNewAgent }: InboxViewProps) {
           </div>
         ) : visible.length === 0 ? (
           <div className="px-4 py-8 text-center text-text-muted text-xs">
-            No agents match this filter.
+            {searchQuery ? 'No agents match your search.' : 'No agents match this filter.'}
           </div>
-        ) : (
-          visible.map((agent) => (
-            <InboxCard
-              key={agent.id}
-              agent={agent}
-              onClick={() => handleSelect(agent.id)}
-            />
-          ))
-        )}
+        ) : (() => {
+          const active = visible.filter((a) => !a.isTabled)
+          const tabled = visible.filter((a) => a.isTabled)
+          return (
+            <>
+              {active.map((agent) => (
+                <InboxCard
+                  key={agent.id}
+                  agent={agent}
+                  onClick={() => handleSelect(agent.id)}
+                />
+              ))}
+              {tabled.length > 0 && (
+                <>
+                  <div className="border-t border-border my-2 mx-1" />
+                  <div className="px-2 pb-1 text-[10px] text-text-muted uppercase tracking-wider font-semibold">
+                    Tabled
+                  </div>
+                  {tabled.map((agent) => (
+                    <InboxCard
+                      key={agent.id}
+                      agent={agent}
+                      tabled
+                      onClick={() => handleSelect(agent.id)}
+                    />
+                  ))}
+                </>
+              )}
+            </>
+          )
+        })()}
       </div>
     </div>
   )

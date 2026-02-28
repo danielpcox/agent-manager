@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import type { Agent, AgentStatus, ConversationEvent, CreateAgentParams } from '../types/agent'
 
-type FilterTab = 'all' | 'active' | 'attention' | 'done'
+type FilterTab = 'all' | 'active' | 'attention' | 'tabled'
 
 interface AgentStore {
   agents: Agent[]
@@ -51,21 +51,30 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
     })),
 
   updateAgentStatus: (agentId, status) =>
-    set((state) => ({
-      agents: state.agents.map((a) =>
-        a.id === agentId
-          ? {
-              ...a,
-              status,
-              updatedAt: Date.now(),
-              isUnread:
-                status === 'waiting' || status === 'done' || status === 'error'
-                  ? true
-                  : a.isUnread
-            }
-          : a
-      )
-    })),
+    set((state) => {
+      const now = Date.now()
+      return {
+        agents: state.agents.map((a) => {
+          if (a.id !== agentId) return a
+          // Accumulate running time when leaving running/starting
+          let runningTimeMs = a.runningTimeMs || 0
+          if ((a.status === 'running' || a.status === 'starting') && status !== a.status) {
+            runningTimeMs += now - (a.statusChangedAt || now)
+          }
+          return {
+            ...a,
+            status,
+            updatedAt: now,
+            statusChangedAt: now,
+            runningTimeMs,
+            isUnread:
+              status === 'waiting' || status === 'done' || status === 'error'
+                ? true
+                : a.isUnread
+          }
+        })
+      }
+    }),
 
   addAgentEvent: (agentId, event) =>
     set((state) => ({
@@ -99,20 +108,20 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
     let filtered = agents
 
     switch (filterTab) {
+      case 'all':
+        break
       case 'active':
         filtered = agents.filter((a) =>
-          ['running', 'starting'].includes(a.status)
+          !a.isTabled && ['running', 'starting'].includes(a.status)
         )
         break
       case 'attention':
         filtered = agents.filter((a) =>
-          ['waiting', 'error'].includes(a.status)
+          !a.isTabled && ['waiting', 'error'].includes(a.status)
         )
         break
-      case 'done':
-        filtered = agents.filter((a) =>
-          ['done', 'killed'].includes(a.status)
-        )
+      case 'tabled':
+        filtered = agents.filter((a) => a.isTabled)
         break
     }
 
@@ -133,6 +142,6 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
 
   attentionCount: () =>
     get().agents.filter((a) =>
-      ['waiting', 'error'].includes(a.status)
+      !a.isTabled && ['waiting', 'error'].includes(a.status)
     ).length
 }))

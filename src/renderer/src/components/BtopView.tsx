@@ -30,7 +30,7 @@ export function BtopView() {
     fitAddon.fit()
     terminalRef.current = terminal
 
-    // Start btop via IPC
+    // Start btop (no-op if already running on main side)
     window.api.startBtop(terminal.cols, terminal.rows)
 
     // Handle btop output
@@ -38,7 +38,7 @@ export function BtopView() {
       terminal.write(data)
     })
 
-    // Handle user input (for btop interaction)
+    // Handle user input
     terminal.onData((data) => {
       window.api.writeBtop(data)
     })
@@ -56,8 +56,8 @@ export function BtopView() {
       resizeObserver.disconnect()
       terminal.dispose()
       terminalRef.current = null
-      window.api.stopBtop()
       unsub()
+      // Don't stop btop — keep it running so we don't respawn on every tab switch
     }
   }, [])
 

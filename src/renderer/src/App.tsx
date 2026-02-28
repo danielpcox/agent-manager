@@ -23,8 +23,11 @@ declare global {
       killAgent: (agentId: string) => Promise<void>
       removeAgent: (agentId: string) => Promise<void>
       markRead: (agentId: string) => Promise<void>
+      renameAgent: (agentId: string, name: string) => Promise<void>
+      tableAgent: (agentId: string, tabled: boolean) => Promise<void>
       getAllAgents: () => Promise<Agent[]>
       getAgent: (agentId: string) => Promise<Agent | null>
+      getOutputBuffer: (agentId: string, offset?: number, length?: number) => Promise<{ data: string; totalLength: number }>
       selectDirectory: () => Promise<string | null>
       listSessions: () => Promise<{ sessionId: string; project: string; summary: string; timestamp: string; mtime: number }[]>
       onPtyData: (cb: (data: { agentId: string; data: string }) => void) => () => void
