@@ -42,6 +42,7 @@ export interface Agent {
   statusChangedAt: number
   runningTimeMs: number
   totalCostUsd: number
+  tokenContext: number
   turns: number
   isUnread: boolean
   isTabled: boolean

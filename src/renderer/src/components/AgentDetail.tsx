@@ -5,8 +5,8 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 
-function formatDuration(startMs: number): string {
-  const seconds = Math.floor((Date.now() - startMs) / 1000)
+function formatDuration(ms: number): string {
+  const seconds = Math.floor(ms / 1000)
   if (seconds < 60) return `${seconds}s`
   const minutes = Math.floor(seconds / 60)
   const secs = seconds % 60
@@ -324,9 +324,21 @@ export function AgentDetail() {
 
       {/* Footer stats */}
       <div className="px-4 py-1.5 border-t border-border flex items-center gap-4 text-[10px] text-text-muted shrink-0">
-        <span>Cost: ${agent.totalCostUsd.toFixed(3)}</span>
+        {agent.tokenContext > 0 && (
+          <span title="Current context size">
+            {agent.tokenContext >= 1000
+              ? `${(agent.tokenContext / 1000).toFixed(agent.tokenContext >= 10000 ? 0 : 1)}k tokens`
+              : `${agent.tokenContext} tokens`}
+          </span>
+        )}
         <span>Turns: {agent.turns}</span>
-        <span>Time: {formatDuration(agent.createdAt)}</span>
+        <span title="Total running time">{(() => {
+          const running = agent.runningTimeMs || 0
+          if (agent.status === 'running' || agent.status === 'starting') {
+            return formatDuration(running + (now - (agent.statusChangedAt || agent.createdAt)))
+          }
+          return formatDuration(running)
+        })()}</span>
         {agent.sessionId && (
           <span className="truncate" title={agent.sessionId}>
             Session: {agent.sessionId.substring(0, 8)}...

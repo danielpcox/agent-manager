@@ -193,6 +193,7 @@ export class AgentManager {
       statusChangedAt: now,
       runningTimeMs: 0,
       totalCostUsd: 0,
+      tokenContext: 0,
       turns: 0,
       isUnread: false,
       isTabled: false,
@@ -235,6 +236,7 @@ export class AgentManager {
       statusChangedAt: now,
       runningTimeMs: 0,
       totalCostUsd: 0,
+      tokenContext: 0,
       turns: 0,
       isUnread: false,
       isTabled: false,
@@ -430,6 +432,16 @@ export class AgentManager {
     if (/✻/.test(stripped)) {
       if (managed.agent.status !== 'running') {
         this.updateStatus(managed, 'running')
+      }
+
+      // Parse context token count from spinner line
+      const tokenMatch = stripped.match(/([\d.]+)(k?)\s*tokens/)
+      if (tokenMatch) {
+        const count = Math.round(parseFloat(tokenMatch[1]) * (tokenMatch[2] === 'k' ? 1000 : 1))
+        if (count !== managed.agent.tokenContext) {
+          managed.agent.tokenContext = count
+          this.send('agent:updated', managed.agent)
+        }
       }
     }
 
@@ -749,6 +761,7 @@ export class AgentManager {
       if (!agent.statusChangedAt) agent.statusChangedAt = agent.updatedAt || agent.createdAt
       if (!agent.runningTimeMs) agent.runningTimeMs = 0
       if (agent.isTabled === undefined) agent.isTabled = false
+      if (!agent.tokenContext) agent.tokenContext = 0
 
       const wasActive = ['running', 'starting', 'waiting'].includes(agent.status)
       const tmuxSession = this.tmuxSessionName(agent.id)

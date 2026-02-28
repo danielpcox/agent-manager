@@ -98,8 +98,12 @@ export function InboxCard({ agent, onClick, tabled }: InboxCardProps) {
       <div className="flex items-center justify-between text-[10px] text-text-muted">
         <span className="truncate">{truncateDir(agent.workdir)}</span>
         <div className="flex items-center gap-2 shrink-0 ml-2">
-          {agent.totalCostUsd > 0 && (
-            <span>${agent.totalCostUsd.toFixed(3)}</span>
+          {agent.tokenContext > 0 && (
+            <span title="Context tokens">
+              {agent.tokenContext >= 1000
+                ? `${(agent.tokenContext / 1000).toFixed(agent.tokenContext >= 10000 ? 0 : 1)}k`
+                : agent.tokenContext}
+            </span>
           )}
           {agent.remoteControlUrl && (
             <span title="Remote Control active">RC</span>
