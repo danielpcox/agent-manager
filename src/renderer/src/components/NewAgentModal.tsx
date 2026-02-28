@@ -133,7 +133,7 @@ export function NewAgentModal({ onClose }: NewAgentModalProps) {
   const handleSelectSession = useCallback((s: SessionInfo) => {
     setSessionId(s.sessionId)
     setWorkdir(s.project)
-    setName(s.summary.substring(0, 30).replace(/[^a-zA-Z0-9\s-]/g, '').trim())
+
   }, [])
 
   const handleKeyDown = useCallback(
