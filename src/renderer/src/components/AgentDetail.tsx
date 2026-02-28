@@ -28,6 +28,13 @@ export function AgentDetail() {
     return () => clearInterval(interval)
   }, [])
 
+  // Focus terminal on custom event (triggered by Escape hotkey from App)
+  useEffect(() => {
+    const handler = () => terminalRef.current?.focus()
+    window.addEventListener('focus-terminal', handler)
+    return () => window.removeEventListener('focus-terminal', handler)
+  }, [])
+
   // Single effect: create terminal, load buffer, subscribe to live data
   useEffect(() => {
     if (!termRef.current || !agent) return
@@ -235,11 +242,11 @@ export function AgentDetail() {
                   if (e.key === 'Enter') commitRename()
                   if (e.key === 'Escape') setRenaming(false)
                 }}
-                className="text-sm font-semibold text-text-primary bg-surface-2 border border-border-focus rounded px-1.5 py-0.5 outline-none min-w-0"
+                className="text-base font-semibold text-text-primary bg-surface-2 border border-border-focus rounded px-1.5 py-0.5 outline-none min-w-0"
               />
             ) : (
               <h2
-                className="text-sm font-semibold text-text-primary truncate cursor-pointer hover:text-accent transition-colors"
+                className="text-base font-semibold text-text-primary truncate cursor-pointer hover:text-accent transition-colors"
                 style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
                 onDoubleClick={(e) => { e.preventDefault(); e.stopPropagation(); startRename() }}
                 title="Double-click to rename"

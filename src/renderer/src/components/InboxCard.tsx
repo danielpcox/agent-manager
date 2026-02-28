@@ -69,7 +69,7 @@ export function InboxCard({ agent, onClick, tabled }: InboxCardProps) {
       onClick={onClick}
       className={`w-full text-left p-3 rounded-lg mb-1 transition-all border ${
         isSelected
-          ? 'bg-surface-2 border-border-focus'
+          ? 'bg-accent/15 border-accent/60 shadow-sm'
           : isAttention
             ? 'bg-surface-1 border-status-waiting/30 hover:bg-surface-2'
             : 'bg-surface-1 border-transparent hover:bg-surface-2'

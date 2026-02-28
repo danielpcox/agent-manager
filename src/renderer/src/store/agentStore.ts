@@ -109,6 +109,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
 
     switch (filterTab) {
       case 'all':
+        filtered = agents.filter((a) => !a.isTabled)
         break
       case 'active':
         filtered = agents.filter((a) =>

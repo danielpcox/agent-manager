@@ -110,10 +110,22 @@ export default function App() {
         return
       }
 
-      // Cmd+[ / Cmd+] — prev/next agent
-      if (e.metaKey && (e.key === '[' || e.key === ']') && !isInput) {
+      // Escape — focus terminal (when not in a real input or already in xterm)
+      if (e.key === 'Escape' && !isInput) {
+        const inXterm = (e.target as HTMLElement)?.closest?.('.xterm-screen') !== null
+        if (!inXterm) {
+          window.dispatchEvent(new CustomEvent('focus-terminal'))
+          return
+        }
+      }
+
+      // Cmd+[ / Cmd+] — prev/next agent (tag !== 'INPUT' allows xterm's hidden textarea)
+      if (e.metaKey && (e.key === '[' || e.key === ']') && tag !== 'INPUT') {
         e.preventDefault()
-        const sorted = [...agents].sort((a, b) => b.updatedAt - a.updatedAt)
+        // Match sidebar order exactly: non-tabled, newest first
+        const sorted = [...agents]
+          .filter((a) => !a.isTabled)
+          .sort((a, b) => b.createdAt - a.createdAt)
         if (sorted.length === 0) return
 
         const currentIdx = sorted.findIndex((a) => a.id === selectedAgentId)

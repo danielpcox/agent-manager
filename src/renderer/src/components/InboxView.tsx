@@ -135,37 +135,14 @@ export function InboxView({ onNewAgent }: InboxViewProps) {
           <div className="px-4 py-8 text-center text-text-muted text-xs">
             {searchQuery ? 'No agents match your search.' : 'No agents match this filter.'}
           </div>
-        ) : (() => {
-          const active = visible.filter((a) => !a.isTabled)
-          const tabled = visible.filter((a) => a.isTabled)
-          return (
-            <>
-              {active.map((agent) => (
-                <InboxCard
-                  key={agent.id}
-                  agent={agent}
-                  onClick={() => handleSelect(agent.id)}
-                />
-              ))}
-              {tabled.length > 0 && (
-                <>
-                  <div className="border-t border-border my-2 mx-1" />
-                  <div className="px-2 pb-1 text-[10px] text-text-muted uppercase tracking-wider font-semibold">
-                    Tabled
-                  </div>
-                  {tabled.map((agent) => (
-                    <InboxCard
-                      key={agent.id}
-                      agent={agent}
-                      tabled
-                      onClick={() => handleSelect(agent.id)}
-                    />
-                  ))}
-                </>
-              )}
-            </>
-          )
-        })()}
+        ) : visible.map((agent) => (
+          <InboxCard
+            key={agent.id}
+            agent={agent}
+            tabled={agent.isTabled}
+            onClick={() => handleSelect(agent.id)}
+          />
+        ))}
       </div>
     </div>
   )

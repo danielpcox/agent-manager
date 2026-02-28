@@ -67,7 +67,7 @@ export function Sidebar({ onNewAgent, currentView, onViewChange }: SidebarProps)
   const { agents, selectedAgentId, selectAgent, markRead, attentionCount } =
     useAgentStore()
 
-  const sorted = [...agents].sort((a, b) => b.updatedAt - a.updatedAt)
+  const sorted = [...agents].sort((a, b) => b.createdAt - a.createdAt)
   const active = sorted.filter((a) => !a.isTabled)
   const tabled = sorted.filter((a) => a.isTabled)
   const attention = attentionCount()
