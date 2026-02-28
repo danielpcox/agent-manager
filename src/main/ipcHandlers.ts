@@ -216,10 +216,6 @@ export function registerIpcHandlers(agentManager: AgentManager): void {
     return agentManager.capturePane(agentId)
   })
 
-  ipcMain.handle('agent:getCurrentScreen', async (_event, { agentId }) => {
-    return agentManager.getCurrentScreen(agentId)
-  })
-
   ipcMain.handle('sessions:list', async () => {
     return listClaudeSessions()
   })

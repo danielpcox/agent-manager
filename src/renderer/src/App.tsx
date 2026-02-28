@@ -30,7 +30,6 @@ declare global {
       getAgent: (agentId: string) => Promise<Agent | null>
       getOutputBuffer: (agentId: string, offset?: number, length?: number) => Promise<{ data: string; totalLength: number }>
       capturePane: (agentId: string) => Promise<string>
-      getCurrentScreen: (agentId: string) => Promise<string>
       selectDirectory: () => Promise<string | null>
       listSessions: () => Promise<{ sessionId: string; project: string; summary: string; timestamp: string; mtime: number }[]>
       onPtyData: (cb: (data: { agentId: string; data: string }) => void) => () => void

@@ -694,22 +694,6 @@ export class AgentManager {
     return { data: buf.slice(start, end), totalLength: total }
   }
 
-  // Current screen only (no -S), with escape codes, mouse sequences stripped.
-  // Safe to overlay on top of plain-text history to colorize the visible area.
-  getCurrentScreen(agentId: string): string {
-    const managed = this.agents.get(agentId)
-    if (!managed) return ''
-    const sess = managed.tmuxSession
-    if (!this.tmuxSessionExists(sess)) return ''
-    try {
-      const raw = execSync(
-        `${tmuxBin} capture-pane -p -e -t '${sess}' 2>/dev/null`,
-        { encoding: 'utf8', maxBuffer: MAX_BUFFER }
-      )
-      return raw.replace(/\x1b\[\?(?:1000|1002|1003|1006|1015|2004|1049)[hl]/g, '')
-    } catch { return '' }
-  }
-
   capturePane(agentId: string): string {
     const managed = this.agents.get(agentId)
     if (!managed) return ''
