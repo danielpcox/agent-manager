@@ -18,6 +18,9 @@ const SCREENSHOT_DIR = path.join(os.tmpdir(), 'agent-manager-screenshots')
 
 const MAX_BUFFER = 5 * 1024 * 1024 // 5MB max per agent
 
+// Resolved full path to tmux binary — set by checkTmuxAvailable()
+let tmuxBin = 'tmux'
+
 interface ManagedAgent {
   agent: Agent
   pty: pty.IPty | null
@@ -50,7 +53,7 @@ export class AgentManager {
 
   private tmuxSessionExists(name: string): boolean {
     try {
-      execSync(`tmux has-session -t '=${name}' 2>/dev/null`)
+      execSync(`${tmuxBin} has-session -t '=${name}' 2>/dev/null`)
       return true
     } catch {
       return false
@@ -59,19 +62,36 @@ export class AgentManager {
 
   private killTmuxSession(name: string): void {
     try {
-      execSync(`tmux kill-session -t '=${name}' 2>/dev/null`)
+      execSync(`${tmuxBin} kill-session -t '=${name}' 2>/dev/null`)
     } catch {
       // session may already be gone
     }
   }
 
   static checkTmuxAvailable(): boolean {
-    try {
-      execSync('which tmux')
-      return true
-    } catch {
-      return false
+    // Check well-known paths first (packaged apps lack homebrew in PATH)
+    const candidates = [
+      '/opt/homebrew/bin/tmux',  // macOS ARM homebrew
+      '/usr/local/bin/tmux',     // macOS Intel homebrew / manual
+      '/usr/bin/tmux'            // system
+    ]
+    for (const p of candidates) {
+      if (fs.existsSync(p)) {
+        tmuxBin = p
+        return true
+      }
     }
+    // Fall back to PATH lookup (works in dev)
+    try {
+      const resolved = execSync('which tmux', { encoding: 'utf-8' }).trim()
+      if (resolved) {
+        tmuxBin = resolved
+        return true
+      }
+    } catch {
+      // not found
+    }
+    return false
   }
 
   private generateName(task: string): string {
@@ -227,7 +247,7 @@ export class AgentManager {
     const sess = managed.tmuxSession
 
     // Create tmux session for imported/resumed agent
-    const tmuxCmd = `tmux new-session -d -s ${sess} -x ${cols} -y ${rows} '${shell} -l -c "${claudeCmd.replace(/'/g, "'\\''")}"' \\; set-option -t ${sess} history-limit 50000 && tmux attach-session -t ${sess}`
+    const tmuxCmd = `${tmuxBin} new-session -d -s ${sess} -x ${cols} -y ${rows} '${shell} -l -c "${claudeCmd.replace(/'/g, "'\\''")}"' \\; set-option -t ${sess} history-limit 50000 && ${tmuxBin} attach-session -t ${sess}`
 
     try {
       const ptyProcess = pty.spawn(shell, ['-l', '-c', tmuxCmd], {
@@ -289,7 +309,7 @@ export class AgentManager {
 
     // Create a tmux session running claude, then attach to it
     // The tmux session name is deterministic from the agent ID
-    const tmuxCmd = `tmux new-session -d -s ${sess} -x ${cols} -y ${rows} '${shell} -l -c "${claudeCmd.replace(/'/g, "'\\''")}"' \\; set-option -t ${sess} history-limit 50000 && tmux attach-session -t ${sess}`
+    const tmuxCmd = `${tmuxBin} new-session -d -s ${sess} -x ${cols} -y ${rows} '${shell} -l -c "${claudeCmd.replace(/'/g, "'\\''")}"' \\; set-option -t ${sess} history-limit 50000 && ${tmuxBin} attach-session -t ${sess}`
 
     try {
       const ptyProcess = pty.spawn(shell, ['-l', '-c', tmuxCmd], {
@@ -433,7 +453,7 @@ export class AgentManager {
     const rows = 40
 
     try {
-      const ptyProcess = pty.spawn(shell, ['-l', '-c', `tmux attach-session -t ${sess}`], {
+      const ptyProcess = pty.spawn(shell, ['-l', '-c', `${tmuxBin} attach-session -t ${sess}`], {
         name: 'xterm-256color',
         cols,
         rows,
