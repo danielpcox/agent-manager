@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { useAgentStore } from '../store/agentStore'
 import { StatusBadge } from './StatusBadge'
 import type { AppView } from '../App'
@@ -68,6 +69,16 @@ function AgentRow({
 export function Sidebar({ onNewAgent, currentView, onViewChange, bellEnabled, onToggleBell }: SidebarProps) {
   const { agents, selectedAgentId, selectAgent, markRead, attentionCount } =
     useAgentStore()
+
+  const [webInfo, setWebInfo] = useState<{ url: string; pin: string } | null>(null)
+  useEffect(() => {
+    window.api.getWebInfo().then(setWebInfo).catch(() => {})
+  }, [])
+
+  const copyWebUrl = () => {
+    if (!webInfo) return
+    navigator.clipboard.writeText(`${webInfo.url}?pin=${webInfo.pin}`)
+  }
 
   const sorted = [...agents].sort((a, b) => b.createdAt - a.createdAt)
   const active = sorted.filter((a) => !a.isTabled)
@@ -174,6 +185,25 @@ export function Sidebar({ onNewAgent, currentView, onViewChange, bellEnabled, on
           </>
         )}
       </div>
+      {webInfo && (
+        <div className="px-3 py-3 border-t border-border">
+          <div className="text-[9px] text-text-muted uppercase tracking-wider font-semibold mb-1.5">
+            Mobile Access
+          </div>
+          <button
+            onClick={copyWebUrl}
+            className="w-full text-left group"
+            title="Click to copy URL with PIN"
+          >
+            <div className="text-[10px] text-text-secondary font-mono break-all leading-relaxed group-hover:text-text-primary transition-colors">
+              {webInfo.url}?pin={webInfo.pin}
+            </div>
+            <div className="text-[9px] text-text-muted mt-0.5 group-hover:text-text-secondary transition-colors">
+              Click to copy
+            </div>
+          </button>
+        </div>
+      )}
     </div>
   )
 }

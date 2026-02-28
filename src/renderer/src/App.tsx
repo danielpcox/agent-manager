@@ -43,6 +43,7 @@ declare global {
       resizeBtop: (cols: number, rows: number) => Promise<void>
       stopBtop: () => Promise<void>
       onBtopData: (cb: (data: string) => void) => () => void
+      getWebInfo: () => Promise<{ url: string; pin: string } | null>
     }
   }
 }

@@ -3,12 +3,14 @@ import type { Agent } from '../renderer/src/types/agent'
 
 interface StoreSchema {
   agents: Agent[]
+  pin: string
 }
 
 const store = new Store<StoreSchema>({
   name: 'agent-manager-data',
   defaults: {
-    agents: []
+    agents: [],
+    pin: ''
   }
 })
 
@@ -27,4 +29,13 @@ export function loadAgents(): Agent[] {
 
 export function clearAgents(): void {
   store.set('agents', [])
+}
+
+export function getOrCreatePin(): string {
+  let pin = store.get('pin', '')
+  if (!pin) {
+    pin = String(Math.floor(100000 + Math.random() * 900000))
+    store.set('pin', pin)
+  }
+  return pin
 }

@@ -4,6 +4,7 @@ import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
 import { AgentManager } from './agentManager'
+import { getWebInfo } from './webServer'
 
 interface SessionInfo {
   sessionId: string
@@ -266,5 +267,9 @@ export function registerIpcHandlers(agentManager: AgentManager): void {
       btopPty.kill()
       btopPty = null
     }
+  })
+
+  ipcMain.handle('web:getInfo', async () => {
+    return getWebInfo()
   })
 }
