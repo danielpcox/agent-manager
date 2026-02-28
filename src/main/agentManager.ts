@@ -31,6 +31,7 @@ interface ManagedAgent {
   tmuxSession: string
   idleTimer: ReturnType<typeof setTimeout> | null
   suppressDetectionUntil: number  // epoch ms; skip detectStatus while < Date.now()
+  firstActivityAt: number          // epoch ms of first ✻ in current period; 0 = not started
 }
 
 export class AgentManager {
@@ -200,7 +201,7 @@ export class AgentManager {
       events: []
     }
 
-    const managed: ManagedAgent = { agent, pty: null, outputBuffer: '', tmuxSession: this.tmuxSessionName(id), idleTimer: null, suppressDetectionUntil: 0 }
+    const managed: ManagedAgent = { agent, pty: null, outputBuffer: '', tmuxSession: this.tmuxSessionName(id), idleTimer: null, suppressDetectionUntil: 0, firstActivityAt: 0 }
     this.agents.set(id, managed)
     this.send('agent:created', agent)
     this.onChanged?.()
@@ -243,7 +244,7 @@ export class AgentManager {
       events: []
     }
 
-    const managed: ManagedAgent = { agent, pty: null, outputBuffer: '', tmuxSession: this.tmuxSessionName(id), idleTimer: null, suppressDetectionUntil: 0 }
+    const managed: ManagedAgent = { agent, pty: null, outputBuffer: '', tmuxSession: this.tmuxSessionName(id), idleTimer: null, suppressDetectionUntil: 0, firstActivityAt: 0 }
     this.agents.set(id, managed)
     this.send('agent:created', agent)
     this.onChanged?.()
@@ -428,10 +429,16 @@ export class AgentManager {
     const stripped = data.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '').replace(/\x1b\][^\x07]*\x07/g, '')
 
     // The ✻ activity line (e.g. "✻ Thinking… (5s · ↑ 1.2k tokens)")
-    // is the definitive signal that Claude is actively working
+    // is the definitive signal that Claude is actively working.
+    // Require 5s of continuous ✻ activity before switching to running,
+    // so transient redraws (e.g. resizePtyForRedraw) don't flip the status.
     if (/✻/.test(stripped)) {
       if (managed.agent.status !== 'running') {
-        this.updateStatus(managed, 'running')
+        if (!managed.firstActivityAt) {
+          managed.firstActivityAt = Date.now()
+        } else if (Date.now() - managed.firstActivityAt >= 5000) {
+          this.updateStatus(managed, 'running')
+        }
       }
 
       // Parse context token count from spinner line
@@ -453,6 +460,7 @@ export class AgentManager {
   }
 
   private checkIfWaiting(managed: ManagedAgent): void {
+    managed.firstActivityAt = 0  // activity stopped, reset debounce
     if (managed.agent.status !== 'running') return
 
     // Data stopped flowing for 3s. The ✻ activity line only appears while
@@ -558,6 +566,7 @@ export class AgentManager {
     managed.agent.status = status
     managed.agent.updatedAt = now
     managed.agent.statusChangedAt = now
+    managed.firstActivityAt = 0  // clear debounce on any explicit status change
     if (status === 'waiting' || status === 'done' || status === 'error') {
       managed.agent.isUnread = true
     }
@@ -648,7 +657,6 @@ export class AgentManager {
     managed.pty.resize(cols + 1, rows)
     setTimeout(() => {
       try { managed.pty?.resize(cols, rows) } catch { /* session may have ended */ }
-      managed.suppressDetectionUntil = 0
     }, 50)
   }
 
@@ -765,7 +773,7 @@ export class AgentManager {
 
       const wasActive = ['running', 'starting', 'waiting'].includes(agent.status)
       const tmuxSession = this.tmuxSessionName(agent.id)
-      const managed: ManagedAgent = { agent, pty: null, outputBuffer: '', tmuxSession, idleTimer: null, suppressDetectionUntil: 0 }
+      const managed: ManagedAgent = { agent, pty: null, outputBuffer: '', tmuxSession, idleTimer: null, suppressDetectionUntil: 0, firstActivityAt: 0 }
       this.agents.set(agent.id, managed)
 
       if (this.tmuxSessionExists(tmuxSession)) {
