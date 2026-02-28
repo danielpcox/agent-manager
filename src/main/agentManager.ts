@@ -21,6 +21,9 @@ const MAX_BUFFER = 5 * 1024 * 1024 // 5MB max per agent
 // Resolved full path to tmux binary — set by checkTmuxAvailable()
 let tmuxBin = 'tmux'
 
+// Resolved full path to claude binary — set by resolveClaude()
+let claudeBin = 'claude'
+
 interface ManagedAgent {
   agent: Agent
   pty: pty.IPty | null
@@ -78,20 +81,51 @@ export class AgentManager {
     for (const p of candidates) {
       if (fs.existsSync(p)) {
         tmuxBin = p
-        return true
+        break
+      }
+    }
+    if (tmuxBin === 'tmux') {
+      // Fall back to PATH lookup (works in dev)
+      try {
+        const resolved = execSync('which tmux', { encoding: 'utf-8' }).trim()
+        if (resolved) {
+          tmuxBin = resolved
+        }
+      } catch {
+        // not found
+      }
+    }
+    if (tmuxBin === 'tmux') return false
+
+    // Also resolve claude binary while we're at it
+    AgentManager.resolveClaude()
+    return true
+  }
+
+  private static resolveClaude(): void {
+    const home = os.homedir()
+    const candidates = [
+      path.join(home, '.local', 'bin', 'claude'),    // standard install location
+      path.join(home, '.claude', 'local', 'bin', 'claude'),
+      '/opt/homebrew/bin/claude',
+      '/usr/local/bin/claude',
+      '/usr/bin/claude'
+    ]
+    for (const p of candidates) {
+      if (fs.existsSync(p)) {
+        claudeBin = p
+        return
       }
     }
     // Fall back to PATH lookup (works in dev)
     try {
-      const resolved = execSync('which tmux', { encoding: 'utf-8' }).trim()
+      const resolved = execSync('which claude', { encoding: 'utf-8' }).trim()
       if (resolved) {
-        tmuxBin = resolved
-        return true
+        claudeBin = resolved
       }
     } catch {
-      // not found
+      // leave as 'claude' and hope the login shell finds it
     }
-    return false
   }
 
   private generateName(task: string): string {
@@ -221,7 +255,7 @@ export class AgentManager {
     const shell = process.env.SHELL || '/bin/zsh'
 
     // Build the claude command for resuming
-    let claudeCmd = 'claude'
+    let claudeCmd = claudeBin
     if (params.sessionId) {
       claudeCmd += ` --resume ${params.sessionId}`
     } else if (params.continueRecent) {
@@ -300,7 +334,7 @@ export class AgentManager {
   private spawnPty(managed: ManagedAgent): void {
     const { agent } = managed
     const claudeArgs = this.buildClaudeArgs(agent)
-    const claudeCmd = `claude ${claudeArgs.join(' ')}`
+    const claudeCmd = `${claudeBin} ${claudeArgs.join(' ')}`
 
     const shell = process.env.SHELL || '/bin/zsh'
     const cols = 120
