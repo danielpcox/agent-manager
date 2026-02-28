@@ -4,6 +4,8 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { AgentManager } from './agentManager'
 import { registerIpcHandlers } from './ipcHandlers'
 import { saveAgents, loadAgents } from './store'
+import { startWebServer } from './webServer'
+import { getOrCreatePin } from './store'
 
 // Check tmux availability before anything else
 const hasTmux = AgentManager.checkTmuxAvailable()
@@ -79,6 +81,8 @@ if (!hasTmux) {
     })
 
     registerIpcHandlers(agentManager)
+    const pin = getOrCreatePin()
+    startWebServer(agentManager, pin)
     createWindow()
 
     app.on('activate', function () {

@@ -33,6 +33,7 @@ const api = {
     ipcRenderer.invoke('agent:capturePane', { agentId }) as Promise<string>,
   selectDirectory: () => ipcRenderer.invoke('dialog:selectDirectory'),
   listSessions: () => ipcRenderer.invoke('sessions:list'),
+  getWebInfo: () => ipcRenderer.invoke('web:getInfo') as Promise<{ url: string; pin: string } | null>,
 
   // Event listeners
   onPtyData: (callback: (data: { agentId: string; data: string }) => void) => {

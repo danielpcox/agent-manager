@@ -5,12 +5,13 @@
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
-    "build": "electron-vite build",
+    "build:web": "vite build -c vite.web.config.ts",
+    "build": "npm run build:web && electron-vite build",
     "preview": "electron-vite preview",
     "postinstall": "electron-rebuild -f -w node-pty",
     "rebuild-pty": "electron-rebuild -f -w node-pty",
-    "pack": "electron-vite build && electron-builder --dir",
-    "dist": "electron-vite build && electron-builder"
+    "pack": "npm run build && electron-builder --dir",
+    "dist": "npm run build && electron-builder"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.10.0",
@@ -18,7 +19,9 @@
     "@xterm/xterm": "^5.5.0",
     "electron-store": "^10.0.0",
     "node-pty": "^1.0.0",
-    "uuid": "^11.1.0"
+    "uuid": "^11.1.0",
+    "express": "^4.21.2",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
     "@electron-toolkit/preload": "^3.0.1",
@@ -27,7 +30,9 @@
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "@types/express": "^5.0.0",
     "@types/uuid": "^10.0.0",
+    "@types/ws": "^8.5.14",
     "@vitejs/plugin-react": "^5.1.4",
     "electron": "^34.0.0",
     "electron-builder": "^26.8.1",

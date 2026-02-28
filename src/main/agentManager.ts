@@ -38,6 +38,7 @@ export class AgentManager {
   private agents: Map<string, ManagedAgent> = new Map()
   private window: BrowserWindow | null = null
   onChanged: (() => void) | null = null
+  onEvent: ((channel: string, data: unknown) => void) | null = null
 
   setWindow(win: BrowserWindow): void {
     this.window = win
@@ -47,6 +48,7 @@ export class AgentManager {
     if (this.window && !this.window.isDestroyed()) {
       this.window.webContents.send(channel, data)
     }
+    this.onEvent?.(channel, data)
   }
 
   // --- tmux helpers ---
