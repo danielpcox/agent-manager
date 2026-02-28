@@ -52,3 +52,12 @@ export interface CreateAgentParams {
   model?: string
   permissionMode?: PermissionMode
 }
+
+export interface ImportAgentParams {
+  name?: string
+  workdir: string
+  sessionId?: string
+  continueRecent?: boolean
+  model?: string
+  permissionMode?: PermissionMode
+}

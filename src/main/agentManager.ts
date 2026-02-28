@@ -9,6 +9,7 @@ import type {
   AgentStatus,
   ConversationEvent,
   CreateAgentParams,
+  ImportAgentParams,
   PermissionMode
 } from '../renderer/src/types/agent'
 
@@ -17,11 +18,13 @@ const SCREENSHOT_DIR = path.join(os.tmpdir(), 'agent-manager-screenshots')
 interface ManagedAgent {
   agent: Agent
   pty: pty.IPty | null
+  outputBuffer: string
 }
 
 export class AgentManager {
   private agents: Map<string, ManagedAgent> = new Map()
   private window: BrowserWindow | null = null
+  onChanged: (() => void) | null = null
 
   setWindow(win: BrowserWindow): void {
     this.window = win
@@ -98,12 +101,140 @@ export class AgentManager {
       events: []
     }
 
-    const managed: ManagedAgent = { agent, pty: null }
+    const managed: ManagedAgent = { agent, pty: null, outputBuffer: '' }
     this.agents.set(id, managed)
     this.send('agent:created', agent)
+    this.onChanged?.()
 
+    console.log(`[AgentManager] Creating agent "${name}" in ${params.workdir}`)
     this.spawnPty(managed)
     return agent
+  }
+
+  importAgent(params: ImportAgentParams): Agent {
+    const id = uuidv4()
+    const now = Date.now()
+    const name =
+      params.name ||
+      (params.sessionId
+        ? `resumed-${params.sessionId.substring(0, 8)}`
+        : 'continued-session')
+
+    const agent: Agent = {
+      id,
+      name,
+      task: params.sessionId
+        ? `Resumed session ${params.sessionId}`
+        : 'Continued most recent session',
+      workdir: params.workdir,
+      status: 'starting',
+      model: params.model || 'claude-sonnet-4-6',
+      permissionMode: params.permissionMode || 'autonomous',
+      sessionId: params.sessionId || null,
+      remoteControlUrl: null,
+      createdAt: now,
+      updatedAt: now,
+      totalCostUsd: 0,
+      turns: 0,
+      isUnread: false,
+      events: []
+    }
+
+    const managed: ManagedAgent = { agent, pty: null, outputBuffer: '' }
+    this.agents.set(id, managed)
+    this.send('agent:created', agent)
+    this.onChanged?.()
+
+    console.log(`[AgentManager] Importing session for "${name}" in ${params.workdir}`)
+    this.spawnPtyForImport(managed, params)
+    return agent
+  }
+
+  private spawnPtyForImport(managed: ManagedAgent, params: ImportAgentParams): void {
+    const { agent } = managed
+    const shell = process.env.SHELL || '/bin/zsh'
+
+    // Build the claude command for resuming
+    let claudeCmd = 'claude'
+    if (params.sessionId) {
+      claudeCmd += ` --resume ${params.sessionId}`
+    } else if (params.continueRecent) {
+      claudeCmd += ' -c'
+    }
+
+    // Add permission flags
+    switch (agent.permissionMode) {
+      case 'autonomous':
+        claudeCmd += ' --dangerously-skip-permissions'
+        break
+      case 'plan':
+        claudeCmd += ' --permission-mode plan'
+        break
+    }
+
+    if (agent.model) {
+      claudeCmd += ` --model ${agent.model}`
+    }
+
+    try {
+      const ptyProcess = pty.spawn(shell, ['-l', '-c', claudeCmd], {
+        name: 'xterm-256color',
+        cols: 120,
+        rows: 40,
+        cwd: agent.workdir,
+        env: {
+          ...process.env,
+          TERM: 'xterm-256color',
+          COLORTERM: 'truecolor'
+        } as Record<string, string>
+      })
+
+      managed.pty = ptyProcess
+
+      let buffer = ''
+
+      console.log(`[AgentManager] Import PTY spawned: ${claudeCmd} (cwd: ${agent.workdir})`)
+
+      ptyProcess.onData((data: string) => {
+        buffer += data
+        managed.outputBuffer += data
+        // Keep buffer from growing unbounded
+        if (managed.outputBuffer.length > 10000) {
+          managed.outputBuffer = managed.outputBuffer.slice(-5000)
+        }
+        this.send('agent:ptyData', { agentId: agent.id, data })
+        this.detectSessionInfo(agent, buffer)
+        this.detectRemoteControlUrl(agent, data)
+        this.detectStatus(managed, data)
+        agent.updatedAt = Date.now()
+      })
+
+      ptyProcess.onExit(({ exitCode }) => {
+        console.log(`[AgentManager] Import PTY exited: code=${exitCode}, agent="${agent.name}"`)
+        const newStatus: AgentStatus = exitCode === 0 ? 'done' : 'error'
+        if (exitCode !== 0) {
+          const lastOutput = managed.outputBuffer.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').trim()
+          console.log(`[AgentManager] Last output for "${agent.name}":\n${lastOutput.slice(-2000)}`)
+          this.addEvent(agent, {
+            type: 'error',
+            content: `Process exited with code ${exitCode}. Last output:\n${lastOutput.slice(-500)}`,
+            isError: true
+          })
+        }
+        this.updateStatus(managed, newStatus)
+        managed.pty = null
+      })
+
+      this.updateStatus(managed, 'running')
+    } catch (err) {
+      console.error(`[AgentManager] Failed to spawn import PTY:`, err)
+      this.updateStatus(managed, 'error')
+      this.addEvent(agent, {
+        type: 'error',
+        content: `Failed to resume claude session: ${err}`,
+        isError: true
+      })
+    }
   }
 
   private spawnPty(managed: ManagedAgent): void {
@@ -130,11 +261,17 @@ export class AgentManager {
       })
 
       managed.pty = ptyProcess
+      console.log(`[AgentManager] PTY spawned: claude ${args.join(' ')} (cwd: ${agent.workdir})`)
 
       let buffer = ''
 
       ptyProcess.onData((data: string) => {
         buffer += data
+        managed.outputBuffer += data
+        // Keep buffer from growing unbounded
+        if (managed.outputBuffer.length > 10000) {
+          managed.outputBuffer = managed.outputBuffer.slice(-5000)
+        }
         this.send('agent:ptyData', { agentId: agent.id, data })
 
         // Detect session ID from output (look for common patterns)
@@ -150,7 +287,17 @@ export class AgentManager {
       })
 
       ptyProcess.onExit(({ exitCode }) => {
+        console.log(`[AgentManager] PTY exited: code=${exitCode}, agent="${agent.name}"`)
         const newStatus: AgentStatus = exitCode === 0 ? 'done' : 'error'
+        if (exitCode !== 0) {
+          const lastOutput = managed.outputBuffer.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').trim()
+          console.log(`[AgentManager] Last output for "${agent.name}":\n${lastOutput.slice(-2000)}`)
+          this.addEvent(agent, {
+            type: 'error',
+            content: `Process exited with code ${exitCode}. Last output:\n${lastOutput.slice(-500)}`,
+            isError: true
+          })
+        }
         this.updateStatus(managed, newStatus)
         managed.pty = null
       })
@@ -169,6 +316,7 @@ export class AgentManager {
         }
       }, 2000)
     } catch (err) {
+      console.error(`[AgentManager] Failed to spawn PTY:`, err)
       this.updateStatus(managed, 'error')
       this.addEvent(agent, {
         type: 'error',
@@ -225,6 +373,7 @@ export class AgentManager {
       agentId: managed.agent.id,
       status
     })
+    this.onChanged?.()
   }
 
   private addEvent(
@@ -329,6 +478,7 @@ export class AgentManager {
     this.killAgent(agentId)
     this.agents.delete(agentId)
     this.send('agent:removed', { agentId })
+    this.onChanged?.()
   }
 
   // Serialize agents for persistence (without PTY)
@@ -343,7 +493,7 @@ export class AgentManager {
       if (agent.status === 'running' || agent.status === 'starting') {
         agent.status = 'killed'
       }
-      this.agents.set(agent.id, { agent, pty: null })
+      this.agents.set(agent.id, { agent, pty: null, outputBuffer: '' })
     }
   }
 

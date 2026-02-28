@@ -3,8 +3,24 @@ import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { AgentManager } from './agentManager'
 import { registerIpcHandlers } from './ipcHandlers'
+import { saveAgents, loadAgents } from './store'
 
 const agentManager = new AgentManager()
+
+// Restore persisted agents
+const saved = loadAgents()
+if (saved.length > 0) {
+  agentManager.restore(saved)
+}
+
+// Auto-save on changes (debounced)
+let saveTimeout: ReturnType<typeof setTimeout> | null = null
+agentManager.onChanged = () => {
+  if (saveTimeout) clearTimeout(saveTimeout)
+  saveTimeout = setTimeout(() => {
+    saveAgents(agentManager.serialize())
+  }, 1000)
+}
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
@@ -66,5 +82,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
+  // Save final state before quitting
+  saveAgents(agentManager.serialize())
   agentManager.cleanup()
 })

@@ -5,6 +5,7 @@ export type AgentEventCallback = (data: unknown) => void
 const api = {
   // Agent management
   createAgent: (params: unknown) => ipcRenderer.invoke('agent:create', params),
+  importAgent: (params: unknown) => ipcRenderer.invoke('agent:import', params),
   sendMessage: (agentId: string, message: string) =>
     ipcRenderer.invoke('agent:sendMessage', { agentId, message }),
   sendScreenshot: (agentId: string, imageBase64: string, message: string) =>
@@ -21,6 +22,7 @@ const api = {
   getAllAgents: () => ipcRenderer.invoke('agent:getAll'),
   getAgent: (agentId: string) => ipcRenderer.invoke('agent:get', { agentId }),
   selectDirectory: () => ipcRenderer.invoke('dialog:selectDirectory'),
+  listSessions: () => ipcRenderer.invoke('sessions:list'),
 
   // Event listeners
   onPtyData: (callback: (data: { agentId: string; data: string }) => void) => {

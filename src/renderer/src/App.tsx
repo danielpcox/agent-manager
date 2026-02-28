@@ -14,6 +14,7 @@ declare global {
   interface Window {
     api: {
       createAgent: (params: unknown) => Promise<Agent>
+      importAgent: (params: unknown) => Promise<Agent>
       sendMessage: (agentId: string, message: string) => Promise<void>
       sendScreenshot: (agentId: string, imageBase64: string, message: string) => Promise<void>
       writePty: (agentId: string, data: string) => Promise<void>
@@ -25,6 +26,7 @@ declare global {
       getAllAgents: () => Promise<Agent[]>
       getAgent: (agentId: string) => Promise<Agent | null>
       selectDirectory: () => Promise<string | null>
+      listSessions: () => Promise<{ sessionId: string; project: string; summary: string; timestamp: string; mtime: number }[]>
       onPtyData: (cb: (data: { agentId: string; data: string }) => void) => () => void
       onAgentCreated: (cb: (agent: Agent) => void) => () => void
       onAgentStatusChanged: (cb: (data: { agentId: string; status: AgentStatus }) => void) => () => void
@@ -44,11 +46,15 @@ export default function App() {
   const [showNewAgent, setShowNewAgent] = useState(false)
   const [view, setView] = useState<AppView>('agents')
   const {
+    agents,
+    selectedAgentId,
     addAgent,
     updateAgent,
     updateAgentStatus,
     addAgentEvent,
     removeAgent,
+    selectAgent,
+    markRead,
     setAgents
   } = useAgentStore()
 
@@ -69,6 +75,70 @@ export default function App() {
 
     return () => unsubs.forEach((unsub) => unsub())
   }, [])
+
+  // Global hotkeys
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't intercept when typing in inputs/textareas
+      const tag = (e.target as HTMLElement)?.tagName
+      const isInput = tag === 'INPUT' || tag === 'TEXTAREA'
+
+      // Cmd+N — new agent
+      if (e.metaKey && e.key === 'n') {
+        e.preventDefault()
+        setShowNewAgent(true)
+        return
+      }
+
+      // Cmd+1/2/3 — switch views
+      if (e.metaKey && e.key === '1') {
+        e.preventDefault()
+        setView('agents')
+        return
+      }
+      if (e.metaKey && e.key === '2') {
+        e.preventDefault()
+        setView('usage')
+        return
+      }
+      if (e.metaKey && e.key === '3') {
+        e.preventDefault()
+        setView('btop')
+        return
+      }
+
+      // Cmd+[ / Cmd+] — prev/next agent
+      if (e.metaKey && (e.key === '[' || e.key === ']') && !isInput) {
+        e.preventDefault()
+        const sorted = [...agents].sort((a, b) => b.updatedAt - a.updatedAt)
+        if (sorted.length === 0) return
+
+        const currentIdx = sorted.findIndex((a) => a.id === selectedAgentId)
+        let nextIdx: number
+        if (e.key === ']') {
+          nextIdx = currentIdx < sorted.length - 1 ? currentIdx + 1 : 0
+        } else {
+          nextIdx = currentIdx > 0 ? currentIdx - 1 : sorted.length - 1
+        }
+        const next = sorted[nextIdx]
+        setView('agents')
+        selectAgent(next.id)
+        markRead(next.id)
+        window.api.markRead(next.id)
+        return
+      }
+
+      // Cmd+W — close/deselect current agent detail (not kill)
+      if (e.metaKey && e.key === 'w' && !isInput) {
+        e.preventDefault()
+        selectAgent(null)
+        return
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [agents, selectedAgentId, selectAgent, markRead])
 
   const renderDetailView = () => {
     switch (view) {
