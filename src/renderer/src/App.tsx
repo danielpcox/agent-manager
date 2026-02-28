@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useAgentStore } from './store/agentStore'
 import { Sidebar } from './components/Sidebar'
 import { InboxView } from './components/InboxView'
@@ -46,9 +46,29 @@ declare global {
   }
 }
 
+function playDing(): void {
+  const ctx = new AudioContext()
+  const osc = ctx.createOscillator()
+  const gain = ctx.createGain()
+  osc.connect(gain)
+  gain.connect(ctx.destination)
+  osc.type = 'sine'
+  osc.frequency.setValueAtTime(880, ctx.currentTime)
+  gain.gain.setValueAtTime(0.4, ctx.currentTime)
+  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 1.2)
+  osc.start()
+  osc.stop(ctx.currentTime + 1.2)
+}
+
 export default function App() {
   const [showNewAgent, setShowNewAgent] = useState(false)
   const [view, setView] = useState<AppView>('agents')
+  const [bellEnabled, setBellEnabled] = useState(() => localStorage.getItem('bellEnabled') === 'true')
+  const toggleBell = () => setBellEnabled((prev) => {
+    const next = !prev
+    localStorage.setItem('bellEnabled', String(next))
+    return next
+  })
   const {
     agents,
     selectedAgentId,
@@ -79,6 +99,27 @@ export default function App() {
 
     return () => unsubs.forEach((unsub) => unsub())
   }, [])
+
+  // Bell notification: ding when an agent transitions running→waiting after >30s of running
+  const prevStatusRef = useRef<Record<string, AgentStatus>>({})
+  const runningStartRef = useRef<Record<string, number>>({})
+  useEffect(() => {
+    agents.forEach((agent) => {
+      const prev = prevStatusRef.current[agent.id]
+      if (prev !== agent.status) {
+        if (agent.status === 'running' && prev !== 'running') {
+          runningStartRef.current[agent.id] = Date.now()
+        }
+        if (prev === 'running' && agent.status === 'waiting') {
+          const start = runningStartRef.current[agent.id] ?? 0
+          if (bellEnabled && start > 0 && Date.now() - start > 30_000) {
+            playDing()
+          }
+        }
+        prevStatusRef.current[agent.id] = agent.status
+      }
+    })
+  }, [agents, bellEnabled])
 
   // Global hotkeys
   useEffect(() => {
@@ -181,6 +222,8 @@ export default function App() {
         onNewAgent={() => setShowNewAgent(true)}
         currentView={view}
         onViewChange={setView}
+        bellEnabled={bellEnabled}
+        onToggleBell={toggleBell}
       />
 
       {/* Center — inbox (always visible for agent overview) */}

@@ -16,6 +16,8 @@ interface SidebarProps {
   onNewAgent: () => void
   currentView: AppView
   onViewChange: (view: AppView) => void
+  bellEnabled: boolean
+  onToggleBell: () => void
 }
 
 const viewNavItems: { key: AppView; label: string; icon: string }[] = [
@@ -63,7 +65,7 @@ function AgentRow({
   )
 }
 
-export function Sidebar({ onNewAgent, currentView, onViewChange }: SidebarProps) {
+export function Sidebar({ onNewAgent, currentView, onViewChange, bellEnabled, onToggleBell }: SidebarProps) {
   const { agents, selectedAgentId, selectAgent, markRead, attentionCount } =
     useAgentStore()
 
@@ -109,13 +111,28 @@ export function Sidebar({ onNewAgent, currentView, onViewChange }: SidebarProps)
         <h2 className="text-xs font-semibold text-text-muted uppercase tracking-wider">
           Agents
         </h2>
-        <button
-          onClick={onNewAgent}
-          className="w-5 h-5 flex items-center justify-center rounded text-text-muted hover:text-text-primary hover:bg-surface-3 transition-colors text-sm leading-none"
-          title="New Agent"
-        >
-          +
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={onToggleBell}
+            className={`w-5 h-5 flex items-center justify-center rounded transition-colors ${
+              bellEnabled
+                ? 'text-accent hover:bg-surface-3'
+                : 'text-text-muted hover:text-text-primary hover:bg-surface-3'
+            }`}
+            title={bellEnabled ? 'Notifications on (click to disable)' : 'Notifications off (click to enable)'}
+          >
+            <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M8 16a2 2 0 0 0 1.985-1.75c.017-.137-.097-.25-.235-.25h-3.5c-.138 0-.252.113-.235.25A2 2 0 0 0 8 16zm.5-14.5V1a.5.5 0 0 0-1 0v.5C5.27 1.834 4 3.524 4 5.5v5l-1.5 1.5h11L12 10.5v-5c0-1.976-1.27-3.666-3.5-4z"/>
+            </svg>
+          </button>
+          <button
+            onClick={onNewAgent}
+            className="w-5 h-5 flex items-center justify-center rounded text-text-muted hover:text-text-primary hover:bg-surface-3 transition-colors text-sm leading-none"
+            title="New Agent"
+          >
+            +
+          </button>
+        </div>
       </div>
 
       {/* Agent list */}
