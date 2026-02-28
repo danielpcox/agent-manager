@@ -1,3 +1,4 @@
+afterPack: build/afterPack.cjs
 appId: com.agent-manager
 productName: Agent Manager
 directories:
@@ -10,6 +11,7 @@ files:
 asarUnpack:
   - node_modules/node-pty/**/*
 mac:
+  identity: null
   category: public.app-category.developer-tools
   target:
     - target: dmg

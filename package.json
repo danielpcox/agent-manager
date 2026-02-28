@@ -9,8 +9,8 @@
     "preview": "electron-vite preview",
     "postinstall": "electron-rebuild -f -w node-pty",
     "rebuild-pty": "electron-rebuild -f -w node-pty",
-    "pack": "electron-vite build && electron-builder --dir && codesign --force --deep --sign - 'dist/mac-arm64/Agent Manager.app'",
-    "dist": "electron-vite build && electron-builder && codesign --force --deep --sign - 'dist/mac-arm64/Agent Manager.app'"
+    "pack": "electron-vite build && electron-builder --dir",
+    "dist": "electron-vite build && electron-builder"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.10.0",
