@@ -146,17 +146,6 @@ export function AgentDetail() {
           if (disposed) return
           scrollDown()
           flushPending()
-          // Force a full tmux screen redraw to clear display artifacts from
-          // the plain-text capture-pane pre-population. Resize ±1 sends SIGWINCH,
-          // causing tmux to completely redraw the current pane.
-          if (['starting', 'running', 'waiting'].includes(agent.status)) {
-            setTimeout(() => {
-              if (disposed) return
-              const { cols, rows } = terminal
-              window.api.resizePty(agent.id, cols + 1, rows)
-              setTimeout(() => { if (!disposed) window.api.resizePty(agent.id, cols, rows) }, 50)
-            }, 300)
-          }
         })
       } else {
         if (['killed', 'done', 'error'].includes(agent.status)) {

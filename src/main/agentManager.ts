@@ -689,14 +689,12 @@ export class AgentManager {
     }
     try {
       const raw = execSync(
-        `${tmuxBin} capture-pane -p -e -S -50000 -t '${sess}' 2>/dev/null`,
+        `${tmuxBin} capture-pane -p -S -50000 -t '${sess}' 2>/dev/null`,
         { encoding: 'utf8', maxBuffer: MAX_BUFFER }
       )
-      // Strip sequences that corrupt xterm.js state:
-      // mouse tracking modes (1000/1002/1003/1006/1015) caused scroll events to be
-      // forwarded as mouse input to Claude instead of scrolling the terminal.
-      // Bracketed paste (2004) and alternate screen (1049) are also stripped.
-      return raw.replace(/\x1b\[\?(?:1000|1002|1003|1006|1015|2004|1049)[hl]/g, '')
+      // trimEnd removes tmux's fixed-width space-padding (capture-pane pads each line
+      // to the pane width). Join with \r\n so xterm.js renders LF+CR correctly.
+      return raw.split('\n').map(line => line.trimEnd()).join('\r\n')
     } catch {
       return managed.outputBuffer
     }
