@@ -126,12 +126,20 @@ export function AgentDetail() {
 
     const flushPending = (): void => {
       bufferRendered = true
+      const afterFlush = () => {
+        scrollDown()
+        // Force a tmux screen redraw (resize ±1) to colorize the visible area.
+        // Status detection is suppressed in the main process during the redraw.
+        if (['starting', 'running', 'waiting'].includes(agent.status)) {
+          window.api.resizePtyForRedraw(agent.id, terminal.cols, terminal.rows)
+        }
+      }
       if (pendingWrites.length > 0) {
         const queued = pendingWrites.join('')
         pendingWrites.length = 0
-        terminal.write(queued, scrollDown)
+        terminal.write(queued, afterFlush)
       } else {
-        scrollDown()
+        afterFlush()
       }
     }
 

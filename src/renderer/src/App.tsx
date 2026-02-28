@@ -19,6 +19,7 @@ declare global {
       sendScreenshot: (agentId: string, imageBase64: string, message: string) => Promise<void>
       writePty: (agentId: string, data: string) => Promise<void>
       resizePty: (agentId: string, cols: number, rows: number) => Promise<void>
+      resizePtyForRedraw: (agentId: string, cols: number, rows: number) => Promise<void>
       enableRemoteControl: (agentId: string) => Promise<void>
       killAgent: (agentId: string) => Promise<void>
       removeAgent: (agentId: string) => Promise<void>
@@ -29,6 +30,7 @@ declare global {
       getAgent: (agentId: string) => Promise<Agent | null>
       getOutputBuffer: (agentId: string, offset?: number, length?: number) => Promise<{ data: string; totalLength: number }>
       capturePane: (agentId: string) => Promise<string>
+      getCurrentScreen: (agentId: string) => Promise<string>
       selectDirectory: () => Promise<string | null>
       listSessions: () => Promise<{ sessionId: string; project: string; summary: string; timestamp: string; mtime: number }[]>
       onPtyData: (cb: (data: { agentId: string; data: string }) => void) => () => void

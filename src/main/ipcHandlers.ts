@@ -172,6 +172,10 @@ export function registerIpcHandlers(agentManager: AgentManager): void {
     agentManager.resizePty(agentId, cols, rows)
   })
 
+  ipcMain.handle('agent:resizePtyForRedraw', async (_event, { agentId, cols, rows }) => {
+    agentManager.resizePtyForRedraw(agentId, cols, rows)
+  })
+
   ipcMain.handle('agent:enableRemoteControl', async (_event, { agentId }) => {
     agentManager.enableRemoteControl(agentId)
   })
@@ -210,6 +214,10 @@ export function registerIpcHandlers(agentManager: AgentManager): void {
 
   ipcMain.handle('agent:capturePane', async (_event, { agentId }) => {
     return agentManager.capturePane(agentId)
+  })
+
+  ipcMain.handle('agent:getCurrentScreen', async (_event, { agentId }) => {
+    return agentManager.getCurrentScreen(agentId)
   })
 
   ipcMain.handle('sessions:list', async () => {

@@ -30,6 +30,7 @@ interface ManagedAgent {
   outputBuffer: string
   tmuxSession: string
   idleTimer: ReturnType<typeof setTimeout> | null
+  suppressDetectionUntil: number  // epoch ms; skip detectStatus while < Date.now()
 }
 
 export class AgentManager {
@@ -198,7 +199,7 @@ export class AgentManager {
       events: []
     }
 
-    const managed: ManagedAgent = { agent, pty: null, outputBuffer: '', tmuxSession: this.tmuxSessionName(id), idleTimer: null }
+    const managed: ManagedAgent = { agent, pty: null, outputBuffer: '', tmuxSession: this.tmuxSessionName(id), idleTimer: null, suppressDetectionUntil: 0 }
     this.agents.set(id, managed)
     this.send('agent:created', agent)
     this.onChanged?.()
@@ -240,7 +241,7 @@ export class AgentManager {
       events: []
     }
 
-    const managed: ManagedAgent = { agent, pty: null, outputBuffer: '', tmuxSession: this.tmuxSessionName(id), idleTimer: null }
+    const managed: ManagedAgent = { agent, pty: null, outputBuffer: '', tmuxSession: this.tmuxSessionName(id), idleTimer: null, suppressDetectionUntil: 0 }
     this.agents.set(id, managed)
     this.send('agent:created', agent)
     this.onChanged?.()
@@ -421,6 +422,7 @@ export class AgentManager {
   }
 
   private detectStatus(managed: ManagedAgent, data: string): void {
+    if (managed.suppressDetectionUntil > Date.now()) return
     const stripped = data.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '').replace(/\x1b\][^\x07]*\x07/g, '')
 
     // The ✻ activity line (e.g. "✻ Thinking… (5s · ↑ 1.2k tokens)")
@@ -625,6 +627,19 @@ export class AgentManager {
     }
   }
 
+  // Resize ±1 to force a full tmux screen redraw, suppressing status detection
+  // so the redraw data doesn't incorrectly flip agent status.
+  resizePtyForRedraw(agentId: string, cols: number, rows: number): void {
+    const managed = this.agents.get(agentId)
+    if (!managed?.pty) return
+    managed.suppressDetectionUntil = Date.now() + 600
+    managed.pty.resize(cols + 1, rows)
+    setTimeout(() => {
+      try { managed.pty?.resize(cols, rows) } catch { /* session may have ended */ }
+      managed.suppressDetectionUntil = 0
+    }, 50)
+  }
+
   killAgent(agentId: string): void {
     const managed = this.agents.get(agentId)
     if (!managed) return
@@ -677,6 +692,22 @@ export class AgentManager {
     const end = Math.min(start + chunkSize, total)
 
     return { data: buf.slice(start, end), totalLength: total }
+  }
+
+  // Current screen only (no -S), with escape codes, mouse sequences stripped.
+  // Safe to overlay on top of plain-text history to colorize the visible area.
+  getCurrentScreen(agentId: string): string {
+    const managed = this.agents.get(agentId)
+    if (!managed) return ''
+    const sess = managed.tmuxSession
+    if (!this.tmuxSessionExists(sess)) return ''
+    try {
+      const raw = execSync(
+        `${tmuxBin} capture-pane -p -e -t '${sess}' 2>/dev/null`,
+        { encoding: 'utf8', maxBuffer: MAX_BUFFER }
+      )
+      return raw.replace(/\x1b\[\?(?:1000|1002|1003|1006|1015|2004|1049)[hl]/g, '')
+    } catch { return '' }
   }
 
   capturePane(agentId: string): string {
@@ -737,7 +768,7 @@ export class AgentManager {
 
       const wasActive = ['running', 'starting', 'waiting'].includes(agent.status)
       const tmuxSession = this.tmuxSessionName(agent.id)
-      const managed: ManagedAgent = { agent, pty: null, outputBuffer: '', tmuxSession, idleTimer: null }
+      const managed: ManagedAgent = { agent, pty: null, outputBuffer: '', tmuxSession, idleTimer: null, suppressDetectionUntil: 0 }
       this.agents.set(agent.id, managed)
 
       if (this.tmuxSessionExists(tmuxSession)) {
