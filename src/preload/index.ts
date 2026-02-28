@@ -27,6 +27,8 @@ const api = {
   getAgent: (agentId: string) => ipcRenderer.invoke('agent:get', { agentId }),
   getOutputBuffer: (agentId: string, offset?: number, length?: number) =>
     ipcRenderer.invoke('agent:getOutputBuffer', { agentId, offset, length }) as Promise<{ data: string; totalLength: number }>,
+  capturePane: (agentId: string) =>
+    ipcRenderer.invoke('agent:capturePane', { agentId }) as Promise<string>,
   selectDirectory: () => ipcRenderer.invoke('dialog:selectDirectory'),
   listSessions: () => ipcRenderer.invoke('sessions:list'),
 

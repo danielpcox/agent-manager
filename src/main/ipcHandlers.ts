@@ -208,6 +208,10 @@ export function registerIpcHandlers(agentManager: AgentManager): void {
     return agentManager.getOutputBuffer(agentId, offset, length)
   })
 
+  ipcMain.handle('agent:capturePane', async (_event, { agentId }) => {
+    return agentManager.capturePane(agentId)
+  })
+
   ipcMain.handle('sessions:list', async () => {
     return listClaudeSessions()
   })

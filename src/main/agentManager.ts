@@ -281,7 +281,7 @@ export class AgentManager {
     const sess = managed.tmuxSession
 
     // Create tmux session for imported/resumed agent
-    const tmuxCmd = `${tmuxBin} new-session -d -s ${sess} -x ${cols} -y ${rows} '${shell} -l -c "${claudeCmd.replace(/'/g, "'\\''")}"' \\; set-option -t ${sess} history-limit 50000 && ${tmuxBin} attach-session -t ${sess}`
+    const tmuxCmd = `${tmuxBin} new-session -d -s ${sess} -x ${cols} -y ${rows} '${shell} -l -c "${claudeCmd.replace(/'/g, "'\\''")}"' \\; set-option -t ${sess} history-limit 50000 \\; set-option -t ${sess} mouse on && ${tmuxBin} attach-session -t ${sess}`
 
     try {
       const ptyProcess = pty.spawn(shell, ['-l', '-c', tmuxCmd], {
@@ -343,7 +343,7 @@ export class AgentManager {
 
     // Create a tmux session running claude, then attach to it
     // The tmux session name is deterministic from the agent ID
-    const tmuxCmd = `${tmuxBin} new-session -d -s ${sess} -x ${cols} -y ${rows} '${shell} -l -c "${claudeCmd.replace(/'/g, "'\\''")}"' \\; set-option -t ${sess} history-limit 50000 && ${tmuxBin} attach-session -t ${sess}`
+    const tmuxCmd = `${tmuxBin} new-session -d -s ${sess} -x ${cols} -y ${rows} '${shell} -l -c "${claudeCmd.replace(/'/g, "'\\''")}"' \\; set-option -t ${sess} history-limit 50000 \\; set-option -t ${sess} mouse on && ${tmuxBin} attach-session -t ${sess}`
 
     try {
       const ptyProcess = pty.spawn(shell, ['-l', '-c', tmuxCmd], {
@@ -485,6 +485,9 @@ export class AgentManager {
     const sess = managed.tmuxSession
     const cols = 120
     const rows = 40
+
+    // Ensure mouse support is on (may be missing on sessions created before this was added)
+    try { execSync(`${tmuxBin} set-option -t '=${sess}' mouse on 2>/dev/null`) } catch { /* ignore */ }
 
     try {
       const ptyProcess = pty.spawn(shell, ['-l', '-c', `${tmuxBin} attach-session -t ${sess}`], {
@@ -674,6 +677,29 @@ export class AgentManager {
     const end = Math.min(start + chunkSize, total)
 
     return { data: buf.slice(start, end), totalLength: total }
+  }
+
+  capturePane(agentId: string): string {
+    const managed = this.agents.get(agentId)
+    if (!managed) return ''
+    const sess = managed.tmuxSession
+    if (!this.tmuxSessionExists(sess)) {
+      // No live tmux session — fall back to accumulated output buffer
+      return managed.outputBuffer
+    }
+    try {
+      const raw = execSync(
+        `${tmuxBin} capture-pane -p -e -S -50000 -t '${sess}' 2>/dev/null`,
+        { encoding: 'utf8', maxBuffer: MAX_BUFFER }
+      )
+      // Strip sequences that corrupt xterm.js state:
+      // mouse tracking modes (1000/1002/1003/1006/1015) caused scroll events to be
+      // forwarded as mouse input to Claude instead of scrolling the terminal.
+      // Bracketed paste (2004) and alternate screen (1049) are also stripped.
+      return raw.replace(/\x1b\[\?(?:1000|1002|1003|1006|1015|2004|1049)[hl]/g, '')
+    } catch {
+      return managed.outputBuffer
+    }
   }
 
   getAgent(agentId: string): Agent | null {

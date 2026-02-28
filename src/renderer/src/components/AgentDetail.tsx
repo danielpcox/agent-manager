@@ -135,10 +135,10 @@ export function AgentDetail() {
       }
     }
 
-    // Load the output buffer (catches data from before this view opened),
-    // write it, then flush queued live data. With tmux, scrollback is
-    // handled natively by tmux (history-limit 50000).
-    window.api.getOutputBuffer(agent.id).then(({ data, totalLength }) => {
+    // Load tmux scrollback history (plain text), then flush queued live data.
+    // capturePane gives clean visual history; live PTY redraws the current TUI on top,
+    // pushing history into xterm.js's scrollback buffer where the user can scroll to it.
+    window.api.capturePane(agent.id).then((data) => {
       if (disposed) return
 
       if (data && data.length > 0) {
@@ -146,9 +146,20 @@ export function AgentDetail() {
           if (disposed) return
           scrollDown()
           flushPending()
+          // Force a full tmux screen redraw to clear display artifacts from
+          // the plain-text capture-pane pre-population. Resize ±1 sends SIGWINCH,
+          // causing tmux to completely redraw the current pane.
+          if (['starting', 'running', 'waiting'].includes(agent.status)) {
+            setTimeout(() => {
+              if (disposed) return
+              const { cols, rows } = terminal
+              window.api.resizePty(agent.id, cols + 1, rows)
+              setTimeout(() => { if (!disposed) window.api.resizePty(agent.id, cols, rows) }, 50)
+            }, 300)
+          }
         })
       } else {
-        if (totalLength === 0 && ['killed', 'done', 'error'].includes(agent.status)) {
+        if (['killed', 'done', 'error'].includes(agent.status)) {
           terminal.write(
             '\x1b[90m Session output not available (restored from previous app session).\r\n' +
             ' Use Import Session to reconnect.\x1b[0m\r\n'
