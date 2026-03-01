@@ -165,13 +165,11 @@ export default function App() {
         return
       }
 
-      // Escape — focus terminal (when not in a real input or already in xterm)
-      if (e.key === 'Escape' && !isInput) {
-        const inXterm = (e.target as HTMLElement)?.closest?.('.xterm-screen') !== null
-        if (!inXterm) {
-          window.dispatchEvent(new CustomEvent('focus-terminal'))
-          return
-        }
+      // Ctrl+E — focus terminal
+      if (e.ctrlKey && e.key === 'e' && !isInput) {
+        e.preventDefault()
+        window.dispatchEvent(new CustomEvent('focus-terminal'))
+        return
       }
 
       // Cmd+[ / Cmd+] — prev/next agent (tag !== 'INPUT' allows xterm's hidden textarea)
