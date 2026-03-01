@@ -8,7 +8,7 @@ import { UsageView } from './components/UsageView'
 import { BtopView } from './components/BtopView'
 import { GlobalStatsView } from './components/GlobalStatsView'
 import type { Agent, AgentStatus, ConversationEvent } from './types/agent'
-import type { SessionStats, GlobalStats } from './types/stats'
+import type { SessionStats, GlobalStats, TranscriptEntry } from './types/stats'
 
 export type AppView = 'agents' | 'usage' | 'btop' | 'stats'
 
@@ -46,6 +46,7 @@ declare global {
       stopBtop: () => Promise<void>
       onBtopData: (cb: (data: string) => void) => () => void
       getWebInfo: () => Promise<{ url: string; pin: string } | null>
+      getSessionTranscript: (sessionId: string, workdir: string) => Promise<TranscriptEntry[]>
       getSessionStats: (sessionId: string, workdir: string) => Promise<SessionStats | null>
       getSessionMemory: (workdir: string) => Promise<string | null>
       getGlobalStats: () => Promise<GlobalStats | null>

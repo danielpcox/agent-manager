@@ -439,33 +439,43 @@ export class AgentManager {
       return false
     }
 
-    const attempt = () => {
-      if (agent.sessionId) return
-
-      // If the directory already has JSONL files, use the newest one immediately
-      if (inferFromExisting()) return
-
+    const startWatcher = () => {
       if (!fs.existsSync(base)) {
-        setTimeout(attempt, 2000)
+        setTimeout(startWatcher, 2000)
         return
       }
 
-      // Directory exists but empty — watch for the first JSONL file to appear
-      let done = false
-      const timeout = setTimeout(() => { done = true; watcher.close() }, 60_000)
-
+      // Watch indefinitely for new JSONL files (handles post-compaction new sessions)
       const watcher = fs.watch(base, (_event, filename) => {
-        if (done || !filename?.endsWith('.jsonl')) return
+        if (!filename?.endsWith('.jsonl')) return
         const sessionId = filename.slice(0, -6)
-        if (!UUID_RE.test(sessionId) || agent.sessionId) return
-        clearTimeout(timeout)
-        done = true
-        watcher.close()
+        if (!UUID_RE.test(sessionId)) return
+        // Only update if this file is newer than the current session's file
+        const newPath = path.join(base, filename)
+        if (agent.sessionId) {
+          const curPath = path.join(base, `${agent.sessionId}.jsonl`)
+          try {
+            if (fs.statSync(newPath).mtimeMs <= fs.statSync(curPath).mtimeMs) return
+          } catch { /* new file wins if current is missing */ }
+        }
         setSession(sessionId)
       })
+
+      // Clean up watcher when agent is removed (best-effort)
+      const origStatus = agent.status
+      void origStatus // referenced to avoid lint warning
+      const checkDead = setInterval(() => {
+        if (!this.agents.has(agent.id)) {
+          clearInterval(checkDead)
+          watcher.close()
+        }
+      }, 30_000)
     }
 
-    attempt()
+    // If the directory already has JSONL files, use the newest one immediately
+    inferFromExisting()
+    // Then watch for newer ones (compaction creates new JSONL files)
+    startWatcher()
   }
 
   private detectRemoteControlUrl(agent: Agent, data: string): void {

@@ -87,6 +87,8 @@ const api = {
   },
 
   // Session intelligence
+  getSessionTranscript: (sessionId: string, workdir: string) =>
+    ipcRenderer.invoke('session:getTranscript', { sessionId, workdir }),
   getSessionStats: (sessionId: string, workdir: string) =>
     ipcRenderer.invoke('session:getStats', { sessionId, workdir }),
   getSessionMemory: (workdir: string) =>

@@ -159,6 +159,21 @@ function findSessionFile(sessionId: string, workdir: string): string | null {
   return null
 }
 
+function findMostRecentSessionFile(workdir: string): string | null {
+  const base = path.join(os.homedir(), '.claude', 'projects', encodeProjectPath(workdir))
+  if (!fs.existsSync(base)) return null
+  let best: { path: string; mtime: number } | null = null
+  for (const f of fs.readdirSync(base)) {
+    if (!f.endsWith('.jsonl')) continue
+    const p = path.join(base, f)
+    try {
+      const mtime = fs.statSync(p).mtimeMs
+      if (!best || mtime > best.mtime) best = { path: p, mtime }
+    } catch { /* ignore */ }
+  }
+  return best?.path ?? null
+}
+
 interface SessionStats {
   slug: string | null
   gitBranch: string | null
@@ -174,7 +189,7 @@ interface SessionStats {
 }
 
 async function parseSessionStats(sessionId: string, workdir: string): Promise<SessionStats | null> {
-  const filePath = findSessionFile(sessionId, workdir)
+  const filePath = findMostRecentSessionFile(workdir) ?? findSessionFile(sessionId, workdir)
   if (!filePath) return null
 
   const stats: SessionStats = {
@@ -245,6 +260,78 @@ async function parseSessionStats(sessionId: string, workdir: string): Promise<Se
 
   stats.filesTouched = [...filesTouchedSet].sort()
   return stats
+}
+
+interface TranscriptBlock {
+  type: 'thinking' | 'text' | 'tool_use' | 'tool_result'
+  content: string
+  toolName?: string
+}
+
+interface TranscriptEntry {
+  role: 'user' | 'assistant'
+  timestamp: string | null
+  blocks: TranscriptBlock[]
+}
+
+async function parseSessionTranscript(sessionId: string, workdir: string): Promise<TranscriptEntry[]> {
+  const filePath = findMostRecentSessionFile(workdir) ?? findSessionFile(sessionId, workdir)
+  if (!filePath) return []
+
+  const entries: TranscriptEntry[] = []
+
+  const rl = readline.createInterface({
+    input: fs.createReadStream(filePath, { encoding: 'utf-8' }),
+    crlfDelay: Infinity
+  })
+
+  for await (const line of rl) {
+    if (!line.trim()) continue
+    let entry: Record<string, unknown>
+    try { entry = JSON.parse(line) } catch { continue }
+
+    const ts = (entry.timestamp as string) || null
+
+    if (entry.type === 'user' && !entry.isMeta) {
+      const content = (entry.message as Record<string, unknown>)?.content
+      const blocks: TranscriptBlock[] = []
+      if (typeof content === 'string') {
+        if (content.trim()) blocks.push({ type: 'text', content })
+      } else if (Array.isArray(content)) {
+        for (const block of content as Record<string, unknown>[]) {
+          if (block.type === 'text' && block.text) {
+            blocks.push({ type: 'text', content: block.text as string })
+          } else if (block.type === 'tool_result') {
+            const inner = block.content
+            const text = typeof inner === 'string' ? inner
+              : Array.isArray(inner) ? (inner as Record<string, unknown>[]).filter(b => b.type === 'text').map(b => b.text).join('\n')
+              : ''
+            if (text) blocks.push({ type: 'tool_result', content: text })
+          }
+        }
+      }
+      if (blocks.length) entries.push({ role: 'user', timestamp: ts, blocks })
+    }
+
+    if (entry.type === 'assistant') {
+      const content = (entry.message as Record<string, unknown>)?.content
+      if (!Array.isArray(content)) continue
+      const blocks: TranscriptBlock[] = []
+      for (const block of content as Record<string, unknown>[]) {
+        if (block.type === 'thinking' && block.thinking) {
+          blocks.push({ type: 'thinking', content: block.thinking as string })
+        } else if (block.type === 'text' && block.text) {
+          blocks.push({ type: 'text', content: block.text as string })
+        } else if (block.type === 'tool_use' && block.name) {
+          const input = block.input ? JSON.stringify(block.input, null, 2) : ''
+          blocks.push({ type: 'tool_use', content: input, toolName: block.name as string })
+        }
+      }
+      if (blocks.length) entries.push({ role: 'assistant', timestamp: ts, blocks })
+    }
+  }
+
+  return entries
 }
 
 function getSessionMemory(workdir: string): string | null {
@@ -410,6 +497,10 @@ export function registerIpcHandlers(agentManager: AgentManager): void {
 
   ipcMain.handle('web:getInfo', async () => {
     return getWebInfo()
+  })
+
+  ipcMain.handle('session:getTranscript', async (_e, { sessionId, workdir }) => {
+    return parseSessionTranscript(sessionId, workdir)
   })
 
   ipcMain.handle('session:getStats', async (_e, { sessionId, workdir }) => {

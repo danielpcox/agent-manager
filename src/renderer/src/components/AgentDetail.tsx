@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback, useState } from 'react'
 import { useAgentStore } from '../store/agentStore'
 import { StatusBadge } from './StatusBadge'
 import { SessionStatsPanel } from './SessionStatsPanel'
+import { TranscriptPanel } from './TranscriptPanel'
 import { MemoryPanel } from './MemoryPanel'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
@@ -23,7 +24,7 @@ export function AgentDetail() {
   const terminalRef = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
   const [now, setNow] = useState(Date.now())
-  const [activeTab, setActiveTab] = useState<'terminal' | 'session' | 'memory'>('terminal')
+  const [activeTab, setActiveTab] = useState<'terminal' | 'session' | 'transcript' | 'memory'>('terminal')
 
   // Reset tab when agent changes
   useEffect(() => { setActiveTab('terminal') }, [agent?.id])
@@ -333,7 +334,7 @@ export function AgentDetail() {
 
       {/* Tab bar */}
       <div className="flex border-b border-border shrink-0 px-2 gap-1 pt-1">
-        {(['terminal', 'session', 'memory'] as const).map((tab) => (
+        {(['terminal', 'session', 'transcript', 'memory'] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -358,6 +359,16 @@ export function AgentDetail() {
         <SessionStatsPanel sessionId={agent.sessionId} workdir={agent.workdir} />
       )}
       {activeTab === 'session' && !agent.sessionId && (
+        <div className="flex-1 flex items-center justify-center p-4 text-sm text-text-muted">
+          No session ID yet — agent may still be starting.
+        </div>
+      )}
+
+      {/* Transcript */}
+      {activeTab === 'transcript' && agent.sessionId && (
+        <TranscriptPanel sessionId={agent.sessionId} workdir={agent.workdir} />
+      )}
+      {activeTab === 'transcript' && !agent.sessionId && (
         <div className="flex-1 flex items-center justify-center p-4 text-sm text-text-muted">
           No session ID yet — agent may still be starting.
         </div>
