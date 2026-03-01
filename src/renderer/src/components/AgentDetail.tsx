@@ -44,10 +44,14 @@ export function AgentDetail() {
 
   // Focus terminal on custom event (triggered by Escape hotkey from App)
   useEffect(() => {
-    const handler = () => terminalRef.current?.focus()
+    const handler = () => {
+      setActiveTab('terminal')
+      // Wait for React to unhide the terminal div before focusing
+      setTimeout(() => terminalRef.current?.focus(), 0)
+    }
     window.addEventListener('focus-terminal', handler)
     return () => window.removeEventListener('focus-terminal', handler)
-  }, [])
+  }, [setActiveTab])
 
   // Single effect: create terminal, load buffer, subscribe to live data
   useEffect(() => {
