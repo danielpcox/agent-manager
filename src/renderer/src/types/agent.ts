@@ -43,7 +43,6 @@ export interface Agent {
   runningTimeMs: number
   totalCostUsd: number
   tokenContext: number
-  turns: number
   isUnread: boolean
   isTabled: boolean
   events: ConversationEvent[]

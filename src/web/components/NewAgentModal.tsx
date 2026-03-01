@@ -20,16 +20,16 @@ const permissionModes: { value: PermissionMode; label: string }[] = [
 
 export function NewAgentModal({ onClose }: NewAgentModalProps) {
   const [task, setTask] = useState('')
-  const [workdir, setWorkdir] = useState('')
+  const [workdir, setWorkdir] = useState('~/projects/')
   const [name, setName] = useState('')
   const [model, setModel] = useState('claude-sonnet-4-6')
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('autonomous')
   const [submitting, setSubmitting] = useState(false)
+  const [confirmCreate, setConfirmCreate] = useState<{ resolvedPath: string } | null>(null)
 
   const canCreate = !!task.trim() && !!workdir.trim()
 
-  const handleCreate = useCallback(async () => {
-    if (!canCreate || submitting) return
+  const doCreate = useCallback(async (createWorkdir: boolean) => {
     setSubmitting(true)
     try {
       await wsApi.createAgent({
@@ -38,12 +38,49 @@ export function NewAgentModal({ onClose }: NewAgentModalProps) {
         name: name.trim() || undefined,
         model,
         permissionMode
-      })
+      }, createWorkdir)
       onClose()
     } catch {
       setSubmitting(false)
     }
-  }, [task, workdir, name, model, permissionMode, canCreate, submitting, onClose])
+  }, [task, workdir, name, model, permissionMode, onClose])
+
+  const handleCreate = useCallback(async () => {
+    if (!canCreate || submitting) return
+    const { exists, resolvedPath } = await wsApi.checkDir(workdir.trim())
+    if (!exists) {
+      setConfirmCreate({ resolvedPath })
+    } else {
+      doCreate(false)
+    }
+  }, [canCreate, submitting, workdir, doCreate])
+
+  if (confirmCreate) {
+    return (
+      <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center px-6">
+        <div className="bg-surface-1 rounded-2xl p-6 w-full max-w-sm space-y-4">
+          <h3 className="text-base font-semibold text-text-primary">Create directory?</h3>
+          <p className="text-sm text-text-secondary break-all font-mono">{confirmCreate.resolvedPath}</p>
+          <p className="text-sm text-text-muted">This directory doesn't exist. Create it?</p>
+          <div className="flex gap-3">
+            <button
+              onClick={() => setConfirmCreate(null)}
+              className="flex-1 py-2.5 rounded-xl border border-border text-sm text-text-secondary"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => doCreate(true)}
+              disabled={submitting}
+              className="flex-1 py-2.5 rounded-xl bg-accent text-white text-sm font-medium disabled:opacity-30"
+            >
+              {submitting ? 'Creating...' : 'Create'}
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div

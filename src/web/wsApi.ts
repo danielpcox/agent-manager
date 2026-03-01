@@ -89,12 +89,14 @@ function connect() {
           listeners.agentRemoved.forEach(cb => cb({ agentId: msg.agentId }))
           break
         case 'capturePane:response':
-        case 'agent:created:response': {
+        case 'agent:created:response':
+        case 'fs:checkDir:response': {
           const req = pendingRequests.get(msg.requestId)
           if (req) {
             pendingRequests.delete(msg.requestId)
             if (msg.type === 'capturePane:response') req.resolve(msg.data)
-            else req.resolve(msg.agent)
+            else if (msg.type === 'agent:created:response') req.resolve(msg.agent)
+            else req.resolve({ exists: msg.exists, resolvedPath: msg.resolvedPath })
           }
           break
         }
@@ -148,9 +150,13 @@ function nextId(): string { return `req-${++reqCounter}` }
 connect()
 
 export const wsApi = {
-  createAgent: (params: CreateAgentParams): Promise<Agent> => {
+  createAgent: (params: CreateAgentParams, createWorkdir = false): Promise<Agent> => {
     const requestId = nextId()
-    return sendWithResponse<Agent>({ type: 'agent:create', requestId, params })
+    return sendWithResponse<Agent>({ type: 'agent:create', requestId, params, createWorkdir })
+  },
+  checkDir: (dirPath: string): Promise<{ exists: boolean; resolvedPath: string }> => {
+    const requestId = nextId()
+    return sendWithResponse<{ exists: boolean; resolvedPath: string }>({ type: 'fs:checkDir', requestId, path: dirPath })
   },
   sendMessage: (agentId: string, message: string): Promise<void> => {
     send({ type: 'agent:sendMessage', agentId, message })

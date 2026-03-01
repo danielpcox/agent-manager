@@ -145,10 +145,9 @@ export class AgentManager {
   private buildClaudeArgs(agent: Agent): string[] {
     const args: string[] = []
 
+    args.push('--dangerously-skip-permissions')
+
     switch (agent.permissionMode) {
-      case 'autonomous':
-        args.push('--dangerously-skip-permissions')
-        break
       case 'readonly':
         args.push(
           '--allowedTools',
@@ -197,7 +196,7 @@ export class AgentManager {
       runningTimeMs: 0,
       totalCostUsd: 0,
       tokenContext: 0,
-      turns: 0,
+
       isUnread: false,
       isTabled: false,
       events: []
@@ -240,7 +239,7 @@ export class AgentManager {
       runningTimeMs: 0,
       totalCostUsd: 0,
       tokenContext: 0,
-      turns: 0,
+
       isUnread: false,
       isTabled: false,
       events: []
@@ -269,13 +268,9 @@ export class AgentManager {
     }
 
     // Add permission flags
-    switch (agent.permissionMode) {
-      case 'autonomous':
-        claudeCmd += ' --dangerously-skip-permissions'
-        break
-      case 'plan':
-        claudeCmd += ' --permission-mode plan'
-        break
+    claudeCmd += ' --dangerously-skip-permissions'
+    if (agent.permissionMode === 'plan') {
+      claudeCmd += ' --permission-mode plan'
     }
 
     if (agent.model) {
@@ -287,7 +282,7 @@ export class AgentManager {
     const sess = managed.tmuxSession
 
     // Create tmux session for imported/resumed agent
-    const tmuxCmd = `${tmuxBin} new-session -d -s ${sess} -x ${cols} -y ${rows} '${shell} -l -c "${claudeCmd.replace(/'/g, "'\\''")}"' \\; set-option -t ${sess} history-limit 50000 \\; set-option -t ${sess} mouse on && ${tmuxBin} attach-session -t ${sess}`
+    const tmuxCmd = `${tmuxBin} new-session -d -s ${sess} -x ${cols} -y ${rows} '${shell} -l -c "${claudeCmd.replace(/'/g, "'\\''")}"' \\; set-option -t ${sess} history-limit 50000 && ${tmuxBin} attach-session -t ${sess}`
 
     try {
       const ptyProcess = pty.spawn(shell, ['-l', '-c', tmuxCmd], {
@@ -349,7 +344,7 @@ export class AgentManager {
 
     // Create a tmux session running claude, then attach to it
     // The tmux session name is deterministic from the agent ID
-    const tmuxCmd = `${tmuxBin} new-session -d -s ${sess} -x ${cols} -y ${rows} '${shell} -l -c "${claudeCmd.replace(/'/g, "'\\''")}"' \\; set-option -t ${sess} history-limit 50000 \\; set-option -t ${sess} mouse on && ${tmuxBin} attach-session -t ${sess}`
+    const tmuxCmd = `${tmuxBin} new-session -d -s ${sess} -x ${cols} -y ${rows} '${shell} -l -c "${claudeCmd.replace(/'/g, "'\\''")}"' \\; set-option -t ${sess} history-limit 50000 && ${tmuxBin} attach-session -t ${sess}`
 
     try {
       const ptyProcess = pty.spawn(shell, ['-l', '-c', tmuxCmd], {
@@ -510,8 +505,9 @@ export class AgentManager {
     const cols = 120
     const rows = 40
 
-    // Ensure mouse support is on (may be missing on sessions created before this was added)
-    try { execSync(`${tmuxBin} set-option -t '=${sess}' mouse on 2>/dev/null`) } catch { /* ignore */ }
+    // Disable tmux mouse mode — we handle all scrolling in xterm.js and mouse on
+    // prevents text selection by causing xterm to forward mouse events to tmux instead.
+    try { execSync(`${tmuxBin} set-option -t '=${sess}' mouse off 2>/dev/null`) } catch { /* ignore */ }
 
     try {
       const ptyProcess = pty.spawn(shell, ['-l', '-c', `${tmuxBin} attach-session -t ${sess}`], {

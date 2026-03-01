@@ -84,6 +84,7 @@ export function AgentDetail() {
       window.api.writePty(agent.id, data)
     })
 
+
     // Handle resize — sync PTY dimensions with terminal
     terminal.onResize(({ cols, rows }) => {
       window.api.resizePty(agent.id, cols, rows)
@@ -331,7 +332,6 @@ export function AgentDetail() {
               : `${agent.tokenContext} tokens`}
           </span>
         )}
-        <span>Turns: {agent.turns}</span>
         <span title="Total running time">{(() => {
           const running = agent.runningTimeMs || 0
           if (agent.status === 'running' || agent.status === 'starting') {
@@ -339,9 +339,10 @@ export function AgentDetail() {
           }
           return formatDuration(running)
         })()}</span>
+        <span>{agent.permissionMode}</span>
         {agent.sessionId && (
           <span className="truncate" title={agent.sessionId}>
-            Session: {agent.sessionId.substring(0, 8)}...
+            session: {agent.sessionId.substring(0, 8)}…
           </span>
         )}
       </div>

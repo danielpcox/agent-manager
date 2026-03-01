@@ -3,6 +3,7 @@ import { WebSocketServer, WebSocket } from 'ws'
 import http from 'http'
 import path from 'path'
 import os from 'os'
+import fs from 'fs'
 import { AgentManager } from './agentManager'
 
 interface WebClient {
@@ -83,8 +84,19 @@ export function startWebServer(agentManager: AgentManager, pin: string): { url: 
             agentManager.sendMessage(msg.agentId, msg.message)
             break
           case 'agent:create': {
-            const agent = agentManager.createAgent(msg.params)
+            const params = { ...msg.params }
+            params.workdir = params.workdir.replace(/^~/, os.homedir())
+            if (msg.createWorkdir) {
+              fs.mkdirSync(params.workdir, { recursive: true })
+            }
+            const agent = agentManager.createAgent(params)
             ws.send(JSON.stringify({ type: 'agent:created:response', requestId: msg.requestId, agent }))
+            break
+          }
+          case 'fs:checkDir': {
+            const resolved = (msg.path as string).replace(/^~/, os.homedir())
+            const exists = fs.existsSync(resolved)
+            ws.send(JSON.stringify({ type: 'fs:checkDir:response', requestId: msg.requestId, exists, resolvedPath: resolved }))
             break
           }
           case 'agent:markRead':

@@ -14,5 +14,5 @@ exports.default = async function afterPack(context) {
   )
 
   console.log(`[afterPack] Re-signing ${appPath}`)
-  execSync(`codesign --force --deep --sign - '${appPath}'`, { stdio: 'inherit' })
+  execSync(`/usr/bin/codesign --force --deep --sign - '${appPath}'`, { stdio: 'inherit' })
 }
