@@ -319,6 +319,7 @@ export class AgentManager {
         }
         this.send('agent:ptyData', { agentId: agent.id, data })
         this.detectRemoteControlUrl(agent, data)
+        this.detectModelChange(agent, data)
         this.detectStatus(managed, data)
         agent.updatedAt = Date.now()
       })
@@ -379,6 +380,7 @@ export class AgentManager {
         }
         this.send('agent:ptyData', { agentId: agent.id, data })
         this.detectRemoteControlUrl(agent, data)
+        this.detectModelChange(agent, data)
         this.detectStatus(managed, data)
         agent.updatedAt = Date.now()
       })
@@ -476,6 +478,14 @@ export class AgentManager {
     inferFromExisting()
     // Then watch for newer ones (compaction creates new JSONL files)
     startWatcher()
+  }
+
+  private detectModelChange(agent: Agent, data: string): void {
+    const match = data.match(/claude-(?:opus|sonnet|haiku)-[\w.-]+/)
+    if (match && match[0] !== agent.model) {
+      agent.model = match[0]
+      this.send('agent:updated', agent)
+    }
   }
 
   private detectRemoteControlUrl(agent: Agent, data: string): void {
@@ -602,6 +612,7 @@ export class AgentManager {
         }
         this.send('agent:ptyData', { agentId: agent.id, data })
         this.detectRemoteControlUrl(agent, data)
+        this.detectModelChange(agent, data)
         this.detectStatus(managed, data)
         agent.updatedAt = Date.now()
       })
