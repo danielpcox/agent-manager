@@ -84,7 +84,14 @@ const api = {
     const handler = (_event: unknown, data: string) => callback(data)
     ipcRenderer.on('btop:data', handler)
     return () => ipcRenderer.removeListener('btop:data', handler)
-  }
+  },
+
+  // Session intelligence
+  getSessionStats: (sessionId: string, workdir: string) =>
+    ipcRenderer.invoke('session:getStats', { sessionId, workdir }),
+  getSessionMemory: (workdir: string) =>
+    ipcRenderer.invoke('session:getMemory', { workdir }),
+  getGlobalStats: () => ipcRenderer.invoke('stats:getGlobal')
 }
 
 contextBridge.exposeInMainWorld('api', api)

@@ -24,7 +24,8 @@ interface SidebarProps {
 const viewNavItems: { key: AppView; label: string; icon: string }[] = [
   { key: 'agents', label: 'Agents', icon: '\u25C8' },
   { key: 'usage', label: 'Usage', icon: '\u2261' },
-  { key: 'btop', label: 'System', icon: '\u2630' }
+  { key: 'btop', label: 'System', icon: '\u2630' },
+  { key: 'stats', label: 'Stats', icon: '\u25CE' }
 ]
 
 function AgentRow({

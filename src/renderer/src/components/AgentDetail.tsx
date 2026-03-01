@@ -1,6 +1,8 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
 import { useAgentStore } from '../store/agentStore'
 import { StatusBadge } from './StatusBadge'
+import { SessionStatsPanel } from './SessionStatsPanel'
+import { MemoryPanel } from './MemoryPanel'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
@@ -21,6 +23,17 @@ export function AgentDetail() {
   const terminalRef = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
   const [now, setNow] = useState(Date.now())
+  const [activeTab, setActiveTab] = useState<'terminal' | 'session' | 'memory'>('terminal')
+
+  // Reset tab when agent changes
+  useEffect(() => { setActiveTab('terminal') }, [agent?.id])
+
+  // Re-fit terminal when switching back to it
+  useEffect(() => {
+    if (activeTab === 'terminal') {
+      fitAddonRef.current?.fit()
+    }
+  }, [activeTab])
 
   // Tick timer for duration display
   useEffect(() => {
@@ -318,10 +331,40 @@ export function AgentDetail() {
         </div>
       </div>
 
-      {/* Terminal */}
-      <div className="flex-1 min-h-0 overflow-hidden">
+      {/* Tab bar */}
+      <div className="flex border-b border-border shrink-0 px-2 gap-1 pt-1">
+        {(['terminal', 'session', 'memory'] as const).map((tab) => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            className={`px-3 py-1.5 text-xs rounded-t capitalize transition-colors ${
+              activeTab === tab
+                ? 'text-text-primary border-b-2 border-accent -mb-px'
+                : 'text-text-muted hover:text-text-secondary'
+            }`}
+          >
+            {tab}
+          </button>
+        ))}
+      </div>
+
+      {/* Terminal — always rendered to preserve xterm state */}
+      <div className={`flex-1 min-h-0 overflow-hidden ${activeTab !== 'terminal' ? 'hidden' : ''}`}>
         <div ref={termRef} className="xterm-container" />
       </div>
+
+      {/* Session stats */}
+      {activeTab === 'session' && agent.sessionId && (
+        <SessionStatsPanel sessionId={agent.sessionId} workdir={agent.workdir} />
+      )}
+      {activeTab === 'session' && !agent.sessionId && (
+        <div className="flex-1 flex items-center justify-center p-4 text-sm text-text-muted">
+          No session ID yet — agent may still be starting.
+        </div>
+      )}
+
+      {/* Memory */}
+      {activeTab === 'memory' && <MemoryPanel workdir={agent.workdir} />}
 
       {/* Footer stats */}
       <div className="px-4 py-1.5 border-t border-border flex items-center gap-4 text-[10px] text-text-muted shrink-0">

@@ -3,6 +3,7 @@ import * as pty from 'node-pty'
 import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
+import readline from 'readline'
 import { AgentManager } from './agentManager'
 import { getWebInfo } from './webServer'
 
@@ -142,6 +143,144 @@ async function listClaudeSessions(): Promise<SessionInfo[]> {
   return sessions
 }
 
+function encodeProjectPath(absPath: string): string {
+  return '-' + absPath.replace(/^\//, '').replace(/[/_]/g, '-')
+}
+
+function findSessionFile(sessionId: string, workdir: string): string | null {
+  const base = path.join(os.homedir(), '.claude', 'projects')
+  const candidate = path.join(base, encodeProjectPath(workdir), `${sessionId}.jsonl`)
+  if (fs.existsSync(candidate)) return candidate
+  if (!fs.existsSync(base)) return null
+  for (const dir of fs.readdirSync(base)) {
+    const p = path.join(base, dir, `${sessionId}.jsonl`)
+    if (fs.existsSync(p)) return p
+  }
+  return null
+}
+
+interface SessionStats {
+  slug: string | null
+  gitBranch: string | null
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  cacheCreationTokens: number
+  toolCallCount: number
+  userMessageCount: number
+  filesTouched: string[]
+  firstActivity: string | null
+  lastActivity: string | null
+}
+
+async function parseSessionStats(sessionId: string, workdir: string): Promise<SessionStats | null> {
+  const filePath = findSessionFile(sessionId, workdir)
+  if (!filePath) return null
+
+  const stats: SessionStats = {
+    slug: null,
+    gitBranch: null,
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheCreationTokens: 0,
+    toolCallCount: 0,
+    userMessageCount: 0,
+    filesTouched: [],
+    firstActivity: null,
+    lastActivity: null
+  }
+
+  const filesTouchedSet = new Set<string>()
+
+  const rl = readline.createInterface({
+    input: fs.createReadStream(filePath, { encoding: 'utf-8' }),
+    crlfDelay: Infinity
+  })
+
+  for await (const line of rl) {
+    if (!line.trim()) continue
+    let entry: Record<string, unknown>
+    try {
+      entry = JSON.parse(line)
+    } catch {
+      continue
+    }
+
+    if (!stats.slug && entry.sessionSlug) stats.slug = entry.sessionSlug as string
+    if (!stats.gitBranch && entry.gitBranch) stats.gitBranch = entry.gitBranch as string
+
+    const ts = entry.timestamp as string | undefined
+    if (ts) {
+      if (!stats.firstActivity) stats.firstActivity = ts
+      stats.lastActivity = ts
+    }
+
+    if (entry.type === 'assistant') {
+      const msg = entry.message as Record<string, unknown> | undefined
+      if (msg?.usage) {
+        const usage = msg.usage as Record<string, number>
+        stats.inputTokens += usage.input_tokens || 0
+        stats.outputTokens += usage.output_tokens || 0
+        stats.cacheReadTokens += usage.cache_read_input_tokens || 0
+        stats.cacheCreationTokens += usage.cache_creation_input_tokens || 0
+      }
+      const content = msg?.content
+      if (Array.isArray(content)) {
+        for (const block of content as Record<string, unknown>[]) {
+          if (block?.type === 'tool_use') stats.toolCallCount++
+        }
+      }
+    }
+
+    if (entry.type === 'user' && !entry.isMeta) {
+      stats.userMessageCount++
+    }
+
+    const toolResult = entry.toolUseResult as Record<string, unknown> | undefined
+    if (toolResult?.filePath) {
+      filesTouchedSet.add(toolResult.filePath as string)
+    }
+  }
+
+  stats.filesTouched = [...filesTouchedSet].sort()
+  return stats
+}
+
+function getSessionMemory(workdir: string): string | null {
+  const base = path.join(os.homedir(), '.claude', 'projects')
+  // Try encoded path directly
+  const memPath = path.join(base, encodeProjectPath(workdir), 'memory', 'MEMORY.md')
+  if (fs.existsSync(memPath)) return fs.readFileSync(memPath, 'utf-8')
+  // Fallback: search all project dirs (handles encoding collisions)
+  if (fs.existsSync(base)) {
+    for (const dir of fs.readdirSync(base)) {
+      const p = path.join(base, dir, 'memory', 'MEMORY.md')
+      if (fs.existsSync(p)) {
+        // Rough match: encoded dir should contain all path segments
+        const segments = workdir.replace(/^\//, '').replace(/_/g, '-').split('/')
+        if (segments.every((seg) => dir.includes(seg))) {
+          return fs.readFileSync(p, 'utf-8')
+        }
+      }
+    }
+  }
+  // Also check CLAUDE.md in the project workdir itself
+  const claudePath = path.join(workdir, 'CLAUDE.md')
+  if (fs.existsSync(claudePath)) return fs.readFileSync(claudePath, 'utf-8')
+  return null
+}
+
+function getGlobalStats(): object | null {
+  const p = path.join(os.homedir(), '.claude', 'stats-cache.json')
+  if (!fs.existsSync(p)) return null
+  try {
+    return JSON.parse(fs.readFileSync(p, 'utf-8'))
+  } catch {
+    return null
+  }
+}
+
 let btopPty: pty.IPty | null = null
 
 export function registerIpcHandlers(agentManager: AgentManager): void {
@@ -271,5 +410,17 @@ export function registerIpcHandlers(agentManager: AgentManager): void {
 
   ipcMain.handle('web:getInfo', async () => {
     return getWebInfo()
+  })
+
+  ipcMain.handle('session:getStats', async (_e, { sessionId, workdir }) => {
+    return parseSessionStats(sessionId, workdir)
+  })
+
+  ipcMain.handle('session:getMemory', async (_e, { workdir }) => {
+    return getSessionMemory(workdir)
+  })
+
+  ipcMain.handle('stats:getGlobal', async () => {
+    return getGlobalStats()
   })
 }
