@@ -16,6 +16,12 @@ import type {
 
 const SCREENSHOT_DIR = path.join(os.tmpdir(), 'agent-manager-screenshots')
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+
+function encodeProjectPath(absPath: string): string {
+  return '-' + absPath.replace(/^\//, '').replace(/[/_]/g, '-')
+}
+
 const MAX_BUFFER = 5 * 1024 * 1024 // 5MB max per agent
 
 // Resolved full path to tmux binary — set by checkTmuxAvailable()
@@ -209,6 +215,7 @@ export class AgentManager {
 
     console.log(`[AgentManager] Creating agent "${name}" in ${params.workdir}`)
     this.spawnPty(managed)
+    this.watchForSessionId(managed)
     return agent
   }
 
@@ -252,6 +259,7 @@ export class AgentManager {
 
     console.log(`[AgentManager] Importing session for "${name}" in ${params.workdir}`)
     this.spawnPtyForImport(managed, params)
+    if (!agent.sessionId) this.watchForSessionId(managed)
     return agent
   }
 
@@ -310,7 +318,6 @@ export class AgentManager {
           managed.outputBuffer = managed.outputBuffer.slice(-MAX_BUFFER / 2)
         }
         this.send('agent:ptyData', { agentId: agent.id, data })
-        this.detectSessionInfo(agent, buffer)
         this.detectRemoteControlUrl(agent, data)
         this.detectStatus(managed, data)
         agent.updatedAt = Date.now()
@@ -371,7 +378,6 @@ export class AgentManager {
           managed.outputBuffer = managed.outputBuffer.slice(-MAX_BUFFER / 2)
         }
         this.send('agent:ptyData', { agentId: agent.id, data })
-        this.detectSessionInfo(agent, buffer)
         this.detectRemoteControlUrl(agent, data)
         this.detectStatus(managed, data)
         agent.updatedAt = Date.now()
@@ -404,13 +410,62 @@ export class AgentManager {
     }
   }
 
-  private detectSessionInfo(agent: Agent, buffer: string): void {
-    // Look for session ID patterns in output
-    const sessionMatch = buffer.match(/session[:\s]+([0-9a-f-]{36})/i)
-    if (sessionMatch && !agent.sessionId) {
-      agent.sessionId = sessionMatch[1]
+  private watchForSessionId(managed: ManagedAgent): void {
+    const { agent } = managed
+    if (agent.sessionId) return
+
+    const base = path.join(os.homedir(), '.claude', 'projects', encodeProjectPath(agent.workdir))
+
+    const setSession = (sessionId: string) => {
+      if (agent.sessionId) return
+      agent.sessionId = sessionId
       this.send('agent:updated', agent)
     }
+
+    // For already-running agents: pick the most recently modified JSONL file
+    const inferFromExisting = (): boolean => {
+      if (!fs.existsSync(base)) return false
+      let best: { id: string; mtime: number } | null = null
+      for (const f of fs.readdirSync(base)) {
+        if (!f.endsWith('.jsonl')) continue
+        const id = f.slice(0, -6)
+        if (!UUID_RE.test(id)) continue
+        try {
+          const mtime = fs.statSync(path.join(base, f)).mtimeMs
+          if (!best || mtime > best.mtime) best = { id, mtime }
+        } catch { /* ignore */ }
+      }
+      if (best) { setSession(best.id); return true }
+      return false
+    }
+
+    const attempt = () => {
+      if (agent.sessionId) return
+
+      // If the directory already has JSONL files, use the newest one immediately
+      if (inferFromExisting()) return
+
+      if (!fs.existsSync(base)) {
+        setTimeout(attempt, 2000)
+        return
+      }
+
+      // Directory exists but empty — watch for the first JSONL file to appear
+      let done = false
+      const timeout = setTimeout(() => { done = true; watcher.close() }, 60_000)
+
+      const watcher = fs.watch(base, (_event, filename) => {
+        if (done || !filename?.endsWith('.jsonl')) return
+        const sessionId = filename.slice(0, -6)
+        if (!UUID_RE.test(sessionId) || agent.sessionId) return
+        clearTimeout(timeout)
+        done = true
+        watcher.close()
+        setSession(sessionId)
+      })
+    }
+
+    attempt()
   }
 
   private detectRemoteControlUrl(agent: Agent, data: string): void {
@@ -535,7 +590,6 @@ export class AgentManager {
           managed.outputBuffer = managed.outputBuffer.slice(-MAX_BUFFER / 2)
         }
         this.send('agent:ptyData', { agentId: agent.id, data })
-        this.detectSessionInfo(agent, buffer)
         this.detectRemoteControlUrl(agent, data)
         this.detectStatus(managed, data)
         agent.updatedAt = Date.now()
@@ -779,6 +833,7 @@ export class AgentManager {
         console.log(`[AgentManager] Reattaching to live tmux session "${tmuxSession}" for "${agent.name}"`)
         agent.status = 'starting'
         this.reattachToTmux(managed)
+        if (!agent.sessionId) this.watchForSessionId(managed)
       } else if (wasActive && agent.sessionId) {
         // tmux session dead but has sessionId — resume via --resume in a new tmux session
         agent.status = 'starting'
