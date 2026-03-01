@@ -104,7 +104,7 @@ A lightweight web server runs alongside the app. The sidebar shows the local URL
 | `Cmd+[` / `Cmd+]` | Previous / next agent |
 | `Cmd+W` | Deselect current agent |
 | `Cmd+F` | Focus search |
-| `Ctrl+E` | Focus terminal |
+| `Cmd+E` | Focus terminal |
 
 ---
 

@@ -165,8 +165,8 @@ export default function App() {
         return
       }
 
-      // Ctrl+E — focus terminal
-      if (e.ctrlKey && e.key === 'e' && !isInput) {
+      // Cmd+E — focus terminal
+      if (e.metaKey && e.key === 'e' && !isInput) {
         e.preventDefault()
         window.dispatchEvent(new CustomEvent('focus-terminal'))
         return
