@@ -6,9 +6,11 @@ import { AgentDetail } from './components/AgentDetail'
 import { NewAgentModal } from './components/NewAgentModal'
 import { UsageView } from './components/UsageView'
 import { BtopView } from './components/BtopView'
+import { GlobalStatsView } from './components/GlobalStatsView'
 import type { Agent, AgentStatus, ConversationEvent } from './types/agent'
+import type { SessionStats, GlobalStats } from './types/stats'
 
-export type AppView = 'agents' | 'usage' | 'btop'
+export type AppView = 'agents' | 'usage' | 'btop' | 'stats'
 
 declare global {
   interface Window {
@@ -44,6 +46,9 @@ declare global {
       stopBtop: () => Promise<void>
       onBtopData: (cb: (data: string) => void) => () => void
       getWebInfo: () => Promise<{ url: string; pin: string } | null>
+      getSessionStats: (sessionId: string, workdir: string) => Promise<SessionStats | null>
+      getSessionMemory: (workdir: string) => Promise<string | null>
+      getGlobalStats: () => Promise<GlobalStats | null>
     }
   }
 }
@@ -153,6 +158,11 @@ export default function App() {
         setView('btop')
         return
       }
+      if (e.metaKey && e.key === '4') {
+        e.preventDefault()
+        setView('stats')
+        return
+      }
 
       // Escape — focus terminal (when not in a real input or already in xterm)
       if (e.key === 'Escape' && !isInput) {
@@ -205,6 +215,8 @@ export default function App() {
         return <UsageView />
       case 'btop':
         return <BtopView />
+      case 'stats':
+        return <GlobalStatsView />
       case 'agents':
       default:
         return <AgentDetail />
