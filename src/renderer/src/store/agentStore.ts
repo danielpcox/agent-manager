@@ -38,7 +38,7 @@ const statusPriority: Record<AgentStatus, number> = {
 export const useAgentStore = create<AgentStore>((set, get) => ({
   agents: [],
   selectedAgentId: null,
-  filterTab: 'all',
+  filterTab: 'attention',
 
   setAgents: (agents) => set({ agents }),
 
