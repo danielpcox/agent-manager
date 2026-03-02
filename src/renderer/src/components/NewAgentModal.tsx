@@ -171,7 +171,8 @@ export function NewAgentModal({ onClose }: NewAgentModalProps) {
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
+      onMouseDown={(e) => { if (e.target === e.currentTarget) (e.currentTarget as HTMLElement).dataset.backdropDown = '1' }}
+      onMouseUp={(e) => { if (e.target === e.currentTarget && (e.currentTarget as HTMLElement).dataset.backdropDown) onClose(); delete (e.currentTarget as HTMLElement).dataset.backdropDown }}
       onKeyDown={handleKeyDown}
     >
       <div className="bg-surface-1 border border-border rounded-xl w-[600px] max-h-[85vh] flex flex-col shadow-2xl">
