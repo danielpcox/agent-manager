@@ -535,7 +535,6 @@ export class AgentManager {
   private checkIfWaiting(managed: ManagedAgent): void {
     managed.firstActivityAt = 0  // activity stopped, reset debounce
     if (managed.agent.status !== 'running') return
-    if (!managed.terminalTabActive) return  // don't flip status while user is on another tab
 
     // Data stopped flowing for 3s. The ✻ activity line only appears while
     // Claude is actively working (thinking, reading, writing, etc.) and
@@ -751,7 +750,16 @@ export class AgentManager {
 
   setTerminalTabActive(agentId: string, active: boolean): void {
     const managed = this.agents.get(agentId)
-    if (managed) managed.terminalTabActive = active
+    if (!managed) return
+    managed.terminalTabActive = active
+    // Switching away from the terminal tab can briefly delay PTY data events
+    // due to IPC reads (e.g. parsing JSONL). Reset the idle timer so the
+    // countdown starts fresh from the moment of the switch, not from when
+    // data last arrived, preventing a false "waiting" trigger.
+    if (!active && managed.idleTimer) {
+      clearTimeout(managed.idleTimer)
+      managed.idleTimer = setTimeout(() => this.checkIfWaiting(managed), 3000)
+    }
   }
 
   tableAgent(agentId: string, tabled: boolean): void {

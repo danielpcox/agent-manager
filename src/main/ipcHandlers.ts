@@ -213,7 +213,10 @@ async function parseSessionStats(sessionId: string, workdir: string): Promise<Se
     crlfDelay: Infinity
   })
 
+  let lineCount = 0
   for await (const line of rl) {
+    // Yield to the event loop every 200 lines so PTY data events aren't starved
+    if (++lineCount % 200 === 0) await new Promise<void>(r => setImmediate(r))
     if (!line.trim()) continue
     let entry: Record<string, unknown>
     try {
@@ -285,7 +288,9 @@ async function parseSessionTranscript(sessionId: string, workdir: string): Promi
     crlfDelay: Infinity
   })
 
+  let lineCount = 0
   for await (const line of rl) {
+    if (++lineCount % 200 === 0) await new Promise<void>(r => setImmediate(r))
     if (!line.trim()) continue
     let entry: Record<string, unknown>
     try { entry = JSON.parse(line) } catch { continue }
