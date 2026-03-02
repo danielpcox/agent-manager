@@ -36,6 +36,20 @@ export function AgentDetail() {
     }
   }, [activeTab])
 
+  // Tell main process whether the terminal tab is active so status detection
+  // is only triggered by live terminal output, not by tab-switch side effects.
+  useEffect(() => {
+    if (!agent) return
+    window.api.setTerminalTabActive(agent.id, activeTab === 'terminal')
+  }, [agent?.id, activeTab])
+
+  useEffect(() => {
+    if (!agent) return
+    // On unmount (agent deselected), re-enable detection so background agents
+    // can still be marked waiting while the user looks at other agents.
+    return () => window.api.setTerminalTabActive(agent.id, true)
+  }, [agent?.id])
+
   // Tick timer for duration display
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 1000)

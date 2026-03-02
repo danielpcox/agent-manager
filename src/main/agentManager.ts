@@ -38,6 +38,7 @@ interface ManagedAgent {
   idleTimer: ReturnType<typeof setTimeout> | null
   suppressDetectionUntil: number  // epoch ms; skip detectStatus while < Date.now()
   firstActivityAt: number          // epoch ms of first ✻ in current period; 0 = not started
+  terminalTabActive: boolean       // false when renderer is on a non-terminal tab
 }
 
 export class AgentManager {
@@ -208,7 +209,7 @@ export class AgentManager {
       events: []
     }
 
-    const managed: ManagedAgent = { agent, pty: null, outputBuffer: '', tmuxSession: this.tmuxSessionName(id), idleTimer: null, suppressDetectionUntil: 0, firstActivityAt: 0 }
+    const managed: ManagedAgent = { agent, pty: null, outputBuffer: '', tmuxSession: this.tmuxSessionName(id), idleTimer: null, suppressDetectionUntil: 0, firstActivityAt: 0, terminalTabActive: true }
     this.agents.set(id, managed)
     this.send('agent:created', agent)
     this.onChanged?.()
@@ -252,7 +253,7 @@ export class AgentManager {
       events: []
     }
 
-    const managed: ManagedAgent = { agent, pty: null, outputBuffer: '', tmuxSession: this.tmuxSessionName(id), idleTimer: null, suppressDetectionUntil: 0, firstActivityAt: 0 }
+    const managed: ManagedAgent = { agent, pty: null, outputBuffer: '', tmuxSession: this.tmuxSessionName(id), idleTimer: null, suppressDetectionUntil: 0, firstActivityAt: 0, terminalTabActive: true }
     this.agents.set(id, managed)
     this.send('agent:created', agent)
     this.onChanged?.()
@@ -534,6 +535,7 @@ export class AgentManager {
   private checkIfWaiting(managed: ManagedAgent): void {
     managed.firstActivityAt = 0  // activity stopped, reset debounce
     if (managed.agent.status !== 'running') return
+    if (!managed.terminalTabActive) return  // don't flip status while user is on another tab
 
     // Data stopped flowing for 3s. The ✻ activity line only appears while
     // Claude is actively working (thinking, reading, writing, etc.) and
@@ -747,6 +749,11 @@ export class AgentManager {
     this.updateStatus(managed, 'killed')
   }
 
+  setTerminalTabActive(agentId: string, active: boolean): void {
+    const managed = this.agents.get(agentId)
+    if (managed) managed.terminalTabActive = active
+  }
+
   tableAgent(agentId: string, tabled: boolean): void {
     const managed = this.agents.get(agentId)
     if (!managed) return
@@ -847,7 +854,7 @@ export class AgentManager {
 
       const wasActive = ['running', 'starting', 'waiting'].includes(agent.status)
       const tmuxSession = this.tmuxSessionName(agent.id)
-      const managed: ManagedAgent = { agent, pty: null, outputBuffer: '', tmuxSession, idleTimer: null, suppressDetectionUntil: 0, firstActivityAt: 0 }
+      const managed: ManagedAgent = { agent, pty: null, outputBuffer: '', tmuxSession, idleTimer: null, suppressDetectionUntil: 0, firstActivityAt: 0, terminalTabActive: true }
       this.agents.set(agent.id, managed)
 
       if (this.tmuxSessionExists(tmuxSession)) {

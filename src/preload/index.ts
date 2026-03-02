@@ -25,6 +25,8 @@ const api = {
     ipcRenderer.invoke('agent:rename', { agentId, name }),
   tableAgent: (agentId: string, tabled: boolean) =>
     ipcRenderer.invoke('agent:table', { agentId, tabled }),
+  setTerminalTabActive: (agentId: string, active: boolean) =>
+    ipcRenderer.send('agent:setTerminalTabActive', { agentId, active }),
   getAllAgents: () => ipcRenderer.invoke('agent:getAll'),
   getAgent: (agentId: string) => ipcRenderer.invoke('agent:get', { agentId }),
   getOutputBuffer: (agentId: string, offset?: number, length?: number) =>

@@ -427,6 +427,10 @@ export function registerIpcHandlers(agentManager: AgentManager): void {
     agentManager.tableAgent(agentId, tabled)
   })
 
+  ipcMain.on('agent:setTerminalTabActive', (_event, { agentId, active }) => {
+    agentManager.setTerminalTabActive(agentId, active)
+  })
+
   ipcMain.handle('agent:getAll', async () => {
     return agentManager.getAllAgents()
   })

@@ -28,6 +28,7 @@ declare global {
       markRead: (agentId: string) => Promise<void>
       renameAgent: (agentId: string, name: string) => Promise<void>
       tableAgent: (agentId: string, tabled: boolean) => Promise<void>
+      setTerminalTabActive: (agentId: string, active: boolean) => void
       getAllAgents: () => Promise<Agent[]>
       getAgent: (agentId: string) => Promise<Agent | null>
       getOutputBuffer: (agentId: string, offset?: number, length?: number) => Promise<{ data: string; totalLength: number }>
