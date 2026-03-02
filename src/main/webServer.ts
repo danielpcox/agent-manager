@@ -48,7 +48,13 @@ export function startWebServer(agentManager: AgentManager, pin: string): { url: 
         const pd = data as { agentId: string; data: string }
         if (!client.subscribedAgentIds.has(pd.agentId)) continue
       }
+      // agent:created and agent:updated carry the Agent object as data directly;
+    // wrap it under `agent` so clients can access msg.agent (matching init message shape)
+    if (channel === 'agent:created' || channel === 'agent:updated') {
+      client.ws.send(JSON.stringify({ type: channel, agent: data }))
+    } else {
       client.ws.send(JSON.stringify({ type: channel, ...(data as object) }))
+    }
     }
   }
 
