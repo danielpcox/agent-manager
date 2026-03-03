@@ -1,96 +1,63 @@
 # Agent Manager
 
-A macOS desktop app for running, monitoring, and inspecting multiple Claude CLI agents simultaneously. Agents live in persistent tmux sessions — they keep working when the app is closed, and you can dip into any terminal at any time.
+A macOS desktop app for running, monitoring, and managing multiple [Claude Code](https://docs.anthropic.com/en/docs/claude-code) agents simultaneously. Agents persist in tmux sessions that survive app restarts, so your work keeps going even when the app is closed.
 
----
+Built with Electron, React, and xterm.js. Designed for workflows where you run many Claude agents in parallel and need to keep track of which ones need attention, without juggling terminal tabs.
 
 ## Features
 
 ### Multi-Agent Inbox
-- Run any number of Claude CLI agents in parallel, each in its own tmux session
-- Inbox with **Needs Attention** filter (default) highlights agents waiting for input
-- Filter tabs: All · Running · Needs Attention · Tabled
+- Run any number of Claude CLI agents in parallel, each in its own persistent tmux session
+- Filter by status: **All**, **Running**, **Needs Attention**, **Tabled**
 - Search agents by name, working directory, task, or model
 - Unread indicators and attention badge count in the sidebar
-- **Bell notification** — plays a soft ding when an agent finishes a long-running task (>30s) and wants input; toggle on/off per session
+- Audio bell notification when an agent finishes a long task (>30s) and enters waiting state
 
-### Persistent Sessions via tmux
-- Agents keep running in the background when you close Agent Manager
-- On relaunch, all live sessions are automatically reattached
-- If a tmux session dies unexpectedly but the Claude session ID is known, the agent auto-resumes via `--resume`
+### Full Terminal Access
+- Complete xterm.js terminal with 50,000-line scrollback
+- Direct keyboard input to the Claude PTY -- dip in and interact just like a regular terminal
+- Captures tmux pane history when selecting an agent so you can scroll back through everything
+- Companion input bar below the terminal for structured messages and screenshot attachments
 
-### Terminal Tab
-- Full xterm.js terminal with 50,000-line scrollback
-- Captures tmux pane history on attach so you can scroll back through the full conversation
-- Keyboard input passes directly to the Claude PTY — use it like any terminal
-- Escape (when not in an input field) focuses the terminal
+### Session Intelligence
+Each agent has tabs for deeper inspection beyond the terminal:
 
-### Session Tab
-Per-session stats parsed directly from `~/.claude/projects/` JSONL files:
-- **Token usage** — input, output, cache read, cache creation totals
-- **Activity** — user message count, tool call count
-- **Files touched** — unique file paths accessed via tool calls, shown relative to workdir
-- **Identity** — session slug and git branch
-- **Timeline** — first and last activity timestamps
+- **Session** -- Token metrics (input, output, cache read/write), user message and tool call counts, files touched, git branch, session timeline
+- **Transcript** -- Full conversation history parsed from Claude's JSONL files, with collapsible thinking blocks and tool calls. Unaffected by terminal redraws.
+- **Memory** -- Renders the project's `MEMORY.md` (Claude's persistent cross-session context)
 
-Session ID is detected automatically via filesystem watch and updates live after conversation compaction.
+### Persistent Sessions
+- Agents run in tmux and continue working when the app is closed
+- On relaunch, the app reattaches to live tmux sessions automatically
+- If a tmux session dies, the app resumes via `claude --resume` using the saved session ID
+- Agent metadata persisted with electron-store
 
-### Transcript Tab
-Full conversation history read directly from the JSONL — not the TUI, so it's unaffected by screen redraws:
-- **User messages**
-- **Thinking blocks** — expanded by default with character count, collapsible
-- **Assistant text responses**
-- **Tool calls** — collapsed by default, expand to see full input JSON
+### Agent Creation & Importing
+- **New Agent** (`Cmd+N`) -- describe a task, pick a working directory, choose a model and permission mode
+- **Import Session** -- browse recent Claude sessions across all projects, enter a session ID directly, or continue the most recent session in a directory (`claude -c`)
+- **Models**: Claude Sonnet 4.6, Claude Opus 4.6, Claude Haiku 4.5
+- **Permission Modes**:
+  - **Autonomous** -- full read/write/execute with `--dangerously-skip-permissions`
+  - **Plan First** -- pauses after creating a plan for approval before writing
+  - **Read Only** -- can read and search, cannot write or execute
 
-Always shows the most recently active session file, so it stays current after Claude compacts the conversation.
-
-### Memory Tab
-Renders the project's `MEMORY.md` from `~/.claude/projects/{encoded-path}/memory/MEMORY.md` — the persistent cross-session context Claude builds up over time.
-
-### Stats View (`Cmd+4`)
-Global Claude CLI activity pulled from `~/.claude/stats-cache.json`:
-- Daily table: date · sessions · messages · tool calls (last 30 days)
-- Token totals aggregated by model across the shown period
-
-### Usage View (`Cmd+2`)
-Embeds `claude.ai/settings/usage` directly in the app so you can track API spend without leaving.
-
-### System Monitor (`Cmd+3`)
-Embeds `btop` as a live terminal panel for CPU, memory, and process monitoring.
-
-### Mobile Web Companion
-A lightweight web server runs alongside the app. The sidebar shows the local URL and PIN — open it on any device on the same network to monitor your agents remotely.
-
----
-
-## Creating & Importing Agents
-
-**New Agent** (`Cmd+N`)
-- Describe the task, select a working directory, optionally set a name
-- Choose model: Sonnet 4.6 · Opus 4.6 · Haiku 4.5
-- Choose permission mode:
-  - **Autonomous** — full read/write/execute, no interruptions
-  - **Plan First** — drafts a plan and pauses for approval before writing
-  - **Read Only** — can read and search, cannot write or execute
-
-**Import Session** (`Cmd+N` → Import tab)
-- **Browse** — searchable list of recent Claude sessions across all projects
-- **By ID** — enter a session UUID directly
-- **Continue Recent** — resumes the most recent session in the selected directory (`claude -c`)
-
----
-
-## Agent Actions
+### Agent Actions
 
 | Action | How |
 |---|---|
 | Rename | Double-click the agent name in the header |
 | Kill | Stop the running process (agent stays in list) |
-| Remove | Remove a finished/killed agent from the list |
-| Table | Set aside without killing — moves to a "Tabled" section |
-| Remote Control | Injects `/rc` into the PTY; click "RC Active" badge to copy the URL |
+| Remove | Delete a finished/killed agent from the list |
+| Table | Set aside without killing -- moves to a "Tabled" section |
+| Remote Control | Injects `/rc` into the PTY; click the "RC Active" badge to copy the URL |
 
----
+### Additional Views
+- **Usage** (`Cmd+2`) -- embedded claude.ai/settings/usage for tracking API spend
+- **System Monitor** (`Cmd+3`) -- embedded btop terminal for CPU/memory monitoring
+- **Global Stats** (`Cmd+4`) -- daily activity table and token totals from Claude CLI stats
+
+### Mobile Web Companion
+A built-in Express + WebSocket server lets you monitor agents from any device on your network. The sidebar shows the local URL and 6-digit PIN. Open it on your phone to see agent statuses, send messages, and create new agents remotely.
 
 ## Keyboard Shortcuts
 
@@ -99,75 +66,132 @@ A lightweight web server runs alongside the app. The sidebar shows the local URL
 | `Cmd+N` | New agent |
 | `Cmd+1` | Agents view |
 | `Cmd+2` | Usage view |
-| `Cmd+3` | System monitor |
-| `Cmd+4` | Stats view |
+| `Cmd+3` | System monitor (btop) |
+| `Cmd+4` | Global stats |
 | `Cmd+[` / `Cmd+]` | Previous / next agent |
 | `Cmd+W` | Deselect current agent |
-| `Cmd+F` | Focus search |
+| `Cmd+F` | Focus search in inbox |
 | `Cmd+E` | Focus terminal |
-
----
 
 ## Prerequisites
 
-- **Node.js** v18+
-- **tmux** — required for persistent sessions
+- **macOS** 11.0 or later (arm64 and x64)
+- **tmux** -- required for persistent agent sessions
+- **Claude CLI** -- installed and authenticated
 
-```sh
+Install tmux:
+```bash
 brew install tmux
 ```
 
----
+Install Claude CLI: see [Claude Code documentation](https://docs.anthropic.com/en/docs/claude-code).
 
-## Development
+## Installation
 
-```sh
+### From GitHub Releases
+
+Download the latest `.dmg` from the [Releases](../../releases) page and drag to Applications.
+
+The app is ad-hoc signed (no Apple Developer certificate). If macOS Gatekeeper blocks it:
+```bash
+xattr -cr '/Applications/Agent Manager.app'
+```
+Or right-click the app and select **Open**.
+
+### From Source
+
+```bash
+git clone https://github.com/danielpcox/agent-manager.git
+cd agent-manager
 npm install
+```
+
+**Development** (hot reload):
+```bash
 npm run dev
 ```
 
-## Building
-
-### Local .app (personal use)
-
-```sh
+**Build .app** (fast, no DMG):
+```bash
 npm run pack
 ```
 
-Builds to `dist/mac-arm64/Agent Manager.app`. To install:
-
-```sh
-pkill -x "Agent Manager"
+Produces `dist/mac-arm64/Agent Manager.app`. To install:
+```bash
+pkill -x "Agent Manager"   # if already running
 cp -R 'dist/mac-arm64/Agent Manager.app' /Applications/
 open -a "Agent Manager"
 ```
 
-### DMG (distribution)
-
-```sh
+**Build DMG** (for distribution):
+```bash
 npm run dist
 ```
 
-Produces a signed DMG in `dist/`.
+## How It Works
 
----
+### Architecture
 
-## Installing without an Apple Developer certificate
-
-The app is ad-hoc signed. If macOS blocks it:
-
-```sh
-xattr -cr '/Applications/Agent Manager.app'
+```
+src/
+├── main/                     # Electron main process
+│   ├── index.ts              # App init, window creation, tmux check
+│   ├── agentManager.ts       # Agent lifecycle, PTY management, tmux
+│   ├── ipcHandlers.ts        # IPC handlers + session intelligence parsing
+│   ├── webServer.ts          # Express + WebSocket for mobile companion
+│   └── store.ts              # electron-store persistence
+├── renderer/                 # Desktop UI (React)
+│   └── src/
+│       ├── App.tsx           # 3-column layout: sidebar + inbox + detail
+│       ├── components/       # UI components
+│       ├── store/            # Zustand state management
+│       └── types/            # TypeScript types
+├── web/                      # Mobile web companion (separate React app)
+│   ├── components/
+│   ├── store/
+│   └── wsApi.ts              # WebSocket client
+└── preload/                  # Electron context bridge
+    └── index.ts
 ```
 
-Or right-click → Open → confirm the Gatekeeper dialog.
+### Agent Lifecycle
 
----
+1. User creates an agent with a task, working directory, model, and permission mode
+2. Main process creates a tmux session and spawns Claude CLI inside it via node-pty
+3. The initial task is sent to Claude's stdin after a brief startup delay
+4. PTY data streams to the renderer in real-time via IPC and renders in xterm.js
+5. The app monitors PTY output to detect status transitions (running / waiting / done)
+6. Session ID is detected by watching `~/.claude/projects/` for JSONL files
+
+### Status Detection
+
+The app watches for Claude's `✻` activity spinner in PTY output. When output stops flowing for 3 seconds without the spinner, the agent is marked as "Needs Attention." A 5-second debounce on the running transition prevents transient redraws from triggering false status changes.
+
+### Session Intelligence
+
+Session stats, transcripts, and memory are parsed directly from Claude's JSONL conversation files in `~/.claude/projects/`. This gives accurate token counts, tool call history, and full conversation reconstructions independent of what's visible in the terminal.
 
 ## Tech Stack
 
-- **Electron** + electron-vite + React + TypeScript
-- **Tailwind v4** + Zustand
-- **node-pty** — PTY-based Claude CLI spawning
-- **xterm.js** — terminal rendering with full scrollback
-- **tmux** — persistent background sessions
+- [Electron](https://www.electronjs.org/) 34 + [electron-vite](https://electron-vite.org/)
+- [React](https://react.dev/) 19 + [TypeScript](https://www.typescriptlang.org/) 5.7
+- [Tailwind CSS](https://tailwindcss.com/) 4
+- [Zustand](https://zustand.docs.pmnd.rs/) 5
+- [node-pty](https://github.com/nicktids/node-pty) -- PTY spawning
+- [xterm.js](https://xtermjs.org/) 5.5 -- terminal rendering
+- [Express](https://expressjs.com/) + [ws](https://github.com/websockets/ws) -- mobile web companion
+- [electron-store](https://github.com/sindresorhus/electron-store) -- persistence
+- [electron-builder](https://www.electron.build/) -- packaging and distribution
+
+## Releases
+
+A GitHub Actions workflow builds and publishes DMG artifacts when you push a version tag:
+
+```bash
+git tag v1.0.2
+git push origin v1.0.2
+```
+
+## License
+
+Licensed under the Apache License 2.0. See [LICENSE](LICENSE) for details.
