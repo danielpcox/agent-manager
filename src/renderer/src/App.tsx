@@ -209,20 +209,6 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [agents, selectedAgentId, selectAgent, markRead])
 
-  const renderDetailView = () => {
-    switch (view) {
-      case 'usage':
-        return <UsageView />
-      case 'btop':
-        return <BtopView />
-      case 'stats':
-        return <GlobalStatsView />
-      case 'agents':
-      default:
-        return <AgentDetail />
-    }
-  }
-
   return (
     <div className="h-screen flex bg-surface-0">
       {/* Draggable title bar area */}
@@ -245,8 +231,11 @@ export default function App() {
         <InboxView onNewAgent={() => setShowNewAgent(true)} />
       )}
 
-      {/* Right — detail view */}
-      {renderDetailView()}
+      {/* Right — always-mounted views, hidden when inactive */}
+      <UsageView active={view === 'usage'} />
+      {view === 'btop' && <BtopView />}
+      {view === 'stats' && <GlobalStatsView />}
+      {view === 'agents' && <AgentDetail />}
 
       {/* New agent modal */}
       {showNewAgent && (

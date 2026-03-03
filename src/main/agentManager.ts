@@ -534,16 +534,18 @@ export class AgentManager {
 
   private checkIfWaiting(managed: ManagedAgent): void {
     managed.firstActivityAt = 0  // activity stopped, reset debounce
+    managed.idleTimer = null     // mark timer as fired (so PTY data can distinguish)
     if (managed.agent.status !== 'running') return
 
-    // Data stopped flowing for 3s. The ✻ activity line only appears while
-    // Claude is actively working (thinking, reading, writing, etc.) and
-    // animates continuously, producing data. So if data stopped AND we
-    // don't see ✻ anymore, Claude is done and waiting at the prompt.
-    //
-    // We could also use tmux capture-pane for a clean read of the current
-    // screen, but checking the buffer tail is simpler and sufficient.
-    this.updateStatus(managed, 'waiting')
+    // Defer to the check phase (setImmediate runs after the poll/I/O phase).
+    // This gives any queued PTY data events a chance to run first — if Claude
+    // is still active, those events will call detectStatus → set a new idleTimer.
+    // If idleTimer is non-null here, PTY data arrived and we abort (false positive).
+    setImmediate(() => {
+      if (managed.agent.status !== 'running') return
+      if (managed.idleTimer !== null) return  // PTY data reset the timer; still active
+      this.updateStatus(managed, 'waiting')
+    })
   }
 
   private handleTmuxClientExit(managed: ManagedAgent, exitCode: number): void {
