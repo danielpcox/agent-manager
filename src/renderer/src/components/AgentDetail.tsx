@@ -99,7 +99,7 @@ export function AgentDetail() {
       fontSize: 13,
       fontFamily: "'SF Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace",
       cursorBlink: true,
-      scrollback: 50000,
+      scrollback: 200000,
       allowProposedApi: true
     })
 

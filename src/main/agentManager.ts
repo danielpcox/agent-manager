@@ -291,7 +291,7 @@ export class AgentManager {
     const sess = managed.tmuxSession
 
     // Create tmux session for imported/resumed agent
-    const tmuxCmd = `${tmuxBin} new-session -d -s ${sess} -x ${cols} -y ${rows} '${shell} -l -c "${claudeCmd.replace(/'/g, "'\\''")}"' \\; set-option -t ${sess} history-limit 50000 \\; set-option -t ${sess} status off && ${tmuxBin} attach-session -t ${sess}`
+    const tmuxCmd = `${tmuxBin} new-session -d -s ${sess} -x ${cols} -y ${rows} '${shell} -l -c "${claudeCmd.replace(/'/g, "'\\''")}"' \\; set-option -t ${sess} history-limit 200000 \\; set-option -t ${sess} status off && ${tmuxBin} attach-session -t ${sess}`
 
     try {
       const ptyProcess = pty.spawn(shell, ['-l', '-c', tmuxCmd], {
@@ -353,7 +353,7 @@ export class AgentManager {
 
     // Create a tmux session running claude, then attach to it
     // The tmux session name is deterministic from the agent ID
-    const tmuxCmd = `${tmuxBin} new-session -d -s ${sess} -x ${cols} -y ${rows} '${shell} -l -c "${claudeCmd.replace(/'/g, "'\\''")}"' \\; set-option -t ${sess} history-limit 50000 \\; set-option -t ${sess} status off && ${tmuxBin} attach-session -t ${sess}`
+    const tmuxCmd = `${tmuxBin} new-session -d -s ${sess} -x ${cols} -y ${rows} '${shell} -l -c "${claudeCmd.replace(/'/g, "'\\''")}"' \\; set-option -t ${sess} history-limit 200000 \\; set-option -t ${sess} status off && ${tmuxBin} attach-session -t ${sess}`
 
     try {
       const ptyProcess = pty.spawn(shell, ['-l', '-c', tmuxCmd], {
@@ -815,7 +815,7 @@ export class AgentManager {
     }
     try {
       const raw = execSync(
-        `${tmuxBin} capture-pane -p -S -50000 -t '${sess}' 2>/dev/null`,
+        `${tmuxBin} capture-pane -p -S -200000 -t '${sess}' 2>/dev/null`,
         { encoding: 'utf8', maxBuffer: MAX_BUFFER }
       )
       // trimEnd removes tmux's fixed-width space-padding (capture-pane pads each line
