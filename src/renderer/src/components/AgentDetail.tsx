@@ -111,8 +111,9 @@ export function AgentDetail() {
     terminalRef.current = terminal
     fitAddonRef.current = fitAddon
 
-    // Handle user input — write to PTY
+    // Handle user input — write to PTY (unless we're still loading the initial buffer)
     terminal.onData((data) => {
+      if (loadingBuffer) return  // ignore input until buffer is loaded
       window.api.writePty(agent.id, data)
     })
 
@@ -135,6 +136,7 @@ export function AgentDetail() {
     // Subscribe to live PTY data, queuing until buffer is fully rendered
     const pendingWrites: string[] = []
     let bufferRendered = false
+    let loadingBuffer = true  // block PTY input while loading initial buffer
 
     const unsubPty = window.api.onPtyData(({ agentId, data }) => {
       if (agentId !== agent.id || disposed) return
@@ -176,15 +178,15 @@ export function AgentDetail() {
       }
     }
 
-    // Load tmux scrollback history (plain text), then flush queued live data.
-    // capturePane gives clean visual history; live PTY redraws the current TUI on top,
-    // pushing history into xterm.js's scrollback buffer where the user can scroll to it.
+    // Load tmux scrollback history. capturePane provides clean visual history without the
+    // intermediate TUI frames that accumulated in outputBuffer. We'll get pending live data after.
     window.api.capturePane(agent.id).then((data) => {
       if (disposed) return
 
       if (data && data.length > 0) {
         terminal.write(data, () => {
           if (disposed) return
+          loadingBuffer = false
           scrollDown()
           flushPending()
         })
@@ -195,11 +197,13 @@ export function AgentDetail() {
             ' Use Import Session to reconnect.\x1b[0m\r\n'
           )
         }
+        loadingBuffer = false
         flushPending()
       }
     }).catch((err) => {
       if (disposed) return
-      console.error('[AgentDetail] Failed to load output buffer:', err)
+      console.error('[AgentDetail] Failed to load scrollback:', err)
+      loadingBuffer = false
       flushPending()
     })
 

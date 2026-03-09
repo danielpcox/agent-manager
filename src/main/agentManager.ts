@@ -814,8 +814,9 @@ export class AgentManager {
       return managed.outputBuffer
     }
     try {
+      // Capture entire tmux history (-S - means from the beginning)
       const raw = execSync(
-        `${tmuxBin} capture-pane -p -S -200000 -t '${sess}' 2>/dev/null`,
+        `${tmuxBin} capture-pane -p -S - -t '${sess}' 2>/dev/null`,
         { encoding: 'utf8', maxBuffer: MAX_BUFFER }
       )
       // trimEnd removes tmux's fixed-width space-padding (capture-pane pads each line
