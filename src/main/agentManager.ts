@@ -50,6 +50,7 @@ interface ManagedAgent {
 export class AgentManager {
   private agents: Map<string, ManagedAgent> = new Map()
   private window: BrowserWindow | null = null
+  private isCleaningUp = false
   onChanged: (() => void) | null = null
   onEvent: ((channel: string, data: unknown) => void) | null = null
 
@@ -58,6 +59,7 @@ export class AgentManager {
   }
 
   private send(channel: string, data: unknown): void {
+    if (this.isCleaningUp) return
     if (this.window && !this.window.isDestroyed()) {
       this.window.webContents.send(channel, data)
     }
@@ -364,6 +366,14 @@ export class AgentManager {
 
   private spawnPtyForImport(managed: ManagedAgent, params: ImportAgentParams): void {
     const { agent } = managed
+
+    // Initialize workdir (create folder if needed, git init, etc)
+    this.initializeWorkdir(managed)
+    if (managed.pty === null && agent.status === 'error') {
+      // initializeWorkdir failed critically
+      return
+    }
+
     const shell = process.env.SHELL || '/bin/zsh'
 
     // Build the claude command for resuming
@@ -448,7 +458,8 @@ export class AgentManager {
         console.log(`[AgentManager] Created workdir: ${agent.workdir}`)
       }
 
-      // Initialize git repo to bypass VS Code "trust this folder" prompt
+      // Initialize git repo to bypass Claude CLI's security prompt on fresh folders
+      // Git repos are not checked for trust, so this prevents the "Is this a project you trust?" dialog
       const gitDir = path.join(agent.workdir, '.git')
       if (!fs.existsSync(gitDir)) {
         execSync('git init', { cwd: agent.workdir, stdio: 'pipe' })
@@ -456,22 +467,17 @@ export class AgentManager {
       }
     } catch (err) {
       console.warn(`[AgentManager] Failed to initialize workdir: ${err}`)
-      // Continue anyway - git init is not critical
+      // Continue anyway - git init is not critical for operation
     }
   }
 
   private spawnPty(managed: ManagedAgent): void {
     const { agent } = managed
 
-    // Ensure workdir exists before spawning
-    try {
-      if (!fs.existsSync(agent.workdir)) {
-        fs.mkdirSync(agent.workdir, { recursive: true })
-        console.log(`[AgentManager] Created workdir: ${agent.workdir}`)
-      }
-    } catch (err) {
-      console.warn(`[AgentManager] Failed to create workdir: ${err}`)
-      this.updateStatus(managed, 'error')
+    // Initialize workdir (create folder, git init, etc)
+    this.initializeWorkdir(managed)
+    if (managed.pty === null && agent.status === 'error') {
+      // initializeWorkdir failed critically
       return
     }
 
@@ -524,16 +530,22 @@ export class AgentManager {
 
       this.updateStatus(managed, 'running')
 
-      // Send the initial task after a short delay for the shell to initialize
-      setTimeout(() => {
-        if (managed.pty) {
-          ptyProcess.write(agent.task + '\r')
-          this.addEvent(agent, {
-            type: 'user_message',
-            content: agent.task
-          })
-        }
-      }, 2000)
+      // Send the initial task after a delay for Claude to initialize
+      if (agent.task) {
+        setTimeout(() => {
+          if (managed.pty) {
+            try {
+              ptyProcess.write(agent.task + '\r')
+              this.addEvent(agent, {
+                type: 'user_message',
+                content: agent.task
+              })
+            } catch (err) {
+              console.warn(`[AgentManager] Failed to inject task: ${err}`)
+            }
+          }
+        }, 3000)
+      }
     } catch (err) {
       console.error(`[AgentManager] Failed to spawn PTY:`, err)
       this.updateStatus(managed, 'error')
@@ -773,6 +785,9 @@ export class AgentManager {
     const { agent } = managed
     managed.pty = null
     if (managed.idleTimer) { clearTimeout(managed.idleTimer); managed.idleTimer = null }
+
+    // Skip status updates during app shutdown
+    if (this.isCleaningUp) return
 
     // Check if the tmux session is still alive (claude still running)
     if (this.tmuxSessionExists(managed.tmuxSession)) {
@@ -1128,12 +1143,19 @@ export class AgentManager {
   }
 
   cleanup(): void {
+    // Flag that we're cleaning up to prevent onExit handlers from updating state
+    this.isCleaningUp = true
+
     // Only kill PTY handles (tmux clients). The tmux sessions survive
     // so agents keep running in the background.
     for (const [, managed] of this.agents) {
       if (managed.idleTimer) { clearTimeout(managed.idleTimer); managed.idleTimer = null }
       if (managed.pty) {
-        managed.pty.kill()
+        try {
+          managed.pty.kill()
+        } catch (err) {
+          console.warn(`[AgentManager] Error killing PTY: ${err}`)
+        }
         managed.pty = null
       }
     }

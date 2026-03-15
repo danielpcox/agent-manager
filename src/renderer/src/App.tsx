@@ -239,7 +239,13 @@ export default function App() {
 
       {/* New agent modal */}
       {showNewAgent && (
-        <NewAgentModal onClose={() => setShowNewAgent(false)} />
+        <NewAgentModal
+          onClose={() => setShowNewAgent(false)}
+          onAgentCreated={(agentId) => {
+            setView('agents')
+            selectAgent(agentId)
+          }}
+        />
       )}
     </div>
   )

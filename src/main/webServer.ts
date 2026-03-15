@@ -24,9 +24,17 @@ function getLocalIp(): string {
 }
 
 let webInfo: { url: string; pin: string } | null = null
+let server: http.Server | null = null
 
 export function getWebInfo(): { url: string; pin: string } | null {
   return webInfo
+}
+
+export function shutdownWebServer(): void {
+  if (server) {
+    server.close()
+    server = null
+  }
 }
 
 export function startWebServer(agentManager: AgentManager, pin: string): { url: string; pin: string } {
@@ -36,7 +44,7 @@ export function startWebServer(agentManager: AgentManager, pin: string): { url: 
   const webDir = path.join(__dirname, '../web')
   app.use(express.static(webDir))
 
-  const server = http.createServer(app)
+  server = http.createServer(app)
   const wss = new WebSocketServer({ noServer: true })
 
   const clients = new Set<WebClient>()

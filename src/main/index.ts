@@ -4,7 +4,7 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { AgentManager } from './agentManager'
 import { registerIpcHandlers } from './ipcHandlers'
 import { saveAgents, loadAgents } from './store'
-import { startWebServer } from './webServer'
+import { startWebServer, shutdownWebServer } from './webServer'
 import { getOrCreatePin } from './store'
 
 // Check tmux availability before anything else
@@ -91,6 +91,7 @@ if (!hasTmux) {
   })
 
   app.on('window-all-closed', () => {
+    shutdownWebServer()
     agentManager.cleanup()
     if (process.platform !== 'darwin') {
       app.quit()
@@ -100,6 +101,7 @@ if (!hasTmux) {
   app.on('before-quit', () => {
     // Save final state before quitting
     saveAgents(agentManager.serialize())
+    shutdownWebServer()
     agentManager.cleanup()
   })
 }
