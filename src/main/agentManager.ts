@@ -221,6 +221,7 @@ export class AgentManager {
     this.onChanged?.()
 
     console.log(`[AgentManager] Creating agent "${name}" in ${params.workdir}`)
+    this.initializeWorkdir(managed)
     this.spawnPty(managed)
     this.watchForSessionId(managed)
     return agent
@@ -436,6 +437,27 @@ export class AgentManager {
         content: `Failed to resume claude session: ${err}`,
         isError: true
       })
+    }
+  }
+
+  private initializeWorkdir(managed: ManagedAgent): void {
+    const { agent } = managed
+    try {
+      // Create workdir if it doesn't exist
+      if (!fs.existsSync(agent.workdir)) {
+        fs.mkdirSync(agent.workdir, { recursive: true })
+        console.log(`[AgentManager] Created workdir: ${agent.workdir}`)
+      }
+
+      // Initialize git repo to bypass VS Code "trust this folder" prompt
+      const gitDir = path.join(agent.workdir, '.git')
+      if (!fs.existsSync(gitDir)) {
+        execSync('git init', { cwd: agent.workdir, stdio: 'pipe' })
+        console.log(`[AgentManager] Initialized git repo in: ${agent.workdir}`)
+      }
+    } catch (err) {
+      console.warn(`[AgentManager] Failed to initialize workdir: ${err}`)
+      // Continue anyway - git init is not critical
     }
   }
 
