@@ -1,8 +1,9 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
-import type { PermissionMode, RemoteSessionInfo } from '../types/agent'
+import type { Agent, PermissionMode, RemoteSessionInfo } from '../types/agent'
 
 interface NewAgentModalProps {
   onClose: () => void
+  onAgentCreated?: (agentId: string) => void
 }
 
 type ModalTab = 'new' | 'import'
@@ -57,7 +58,7 @@ function truncatePath(p: string): string {
   return p
 }
 
-export function NewAgentModal({ onClose }: NewAgentModalProps) {
+export function NewAgentModal({ onClose, onAgentCreated }: NewAgentModalProps) {
   // Mode toggle (local vs remote)
   const [mode, setMode] = useState<ModalMode>('local')
 
@@ -84,6 +85,10 @@ export function NewAgentModal({ onClose }: NewAgentModalProps) {
   const [selectedSession, setSelectedSession] = useState<(RemoteSessionInfo & { user: string; host: string }) | null>(null)
   const [showNewSessionForm, setShowNewSessionForm] = useState(false)
   const [remoteWorkdir, setRemoteWorkdir] = useState('')
+
+  // Create/import state
+  const [isCreating, setIsCreating] = useState(false)
+  const [createError, setCreateError] = useState('')
 
   const taskRef = useRef<HTMLTextAreaElement>(null)
   const sessionRef = useRef<HTMLInputElement>(null)
@@ -158,73 +163,115 @@ export function NewAgentModal({ onClose }: NewAgentModalProps) {
   }, [remoteHost, remoteWorkdir])
 
   const handleCreate = useCallback(async () => {
-    if (mode === 'local') {
-      if (!task.trim() || !workdir) return
+    try {
+      setIsCreating(true)
+      setCreateError('')
 
-      await window.api.createAgent({
-        task: task.trim(),
-        workdir,
-        name: name.trim() || undefined,
-        model,
-        permissionMode
-      })
-    } else {
-      // Remote mode
-      if (!selectedSession) return
+      let agent: Agent | undefined
 
-      // Existing session: no task required, no new Claude spawned
-      if (selectedSession.sessionName) {
-        await window.api.createRemoteAgent({
-          user: selectedSession.user,
-          host: selectedSession.host,
-          workdir: selectedSession.workdir,
-          sessionName: selectedSession.sessionName,
-          task: '', // Empty task for existing sessions
-          name: name.trim() || undefined,
-          model,
-          permissionMode
-        })
-      }
-      // New session: task is required
-      else if (task.trim()) {
-        await window.api.createRemoteAgent({
-          user: selectedSession.user,
-          host: selectedSession.host,
-          workdir: selectedSession.workdir,
-          sessionName: undefined, // Will be generated
+      if (mode === 'local') {
+        if (!workdir) return
+
+        // Use folder name as default if name is empty
+        const folderName = workdir.split('/').pop() || 'agent'
+        const agentName = name.trim() || folderName
+
+        console.log('[NewAgentModal] Creating local agent:', { workdir, name: agentName, task: task.trim() })
+
+        agent = await window.api.createAgent({
           task: task.trim(),
-          name: name.trim() || undefined,
+          workdir,
+          name: agentName,
           model,
           permissionMode
         })
       } else {
-        return
-      }
-    }
+        // Remote mode
+        if (!selectedSession) return
 
-    onClose()
-  }, [mode, task, name, model, permissionMode, selectedSession, onClose])
+        // Existing session: no task required, no new Claude spawned
+        if (selectedSession.sessionName) {
+          console.log('[NewAgentModal] Attaching to remote session:', selectedSession)
+
+          agent = await window.api.createRemoteAgent({
+            user: selectedSession.user,
+            host: selectedSession.host,
+            workdir: selectedSession.workdir,
+            sessionName: selectedSession.sessionName,
+            task: '', // Empty task for existing sessions
+            name: name.trim() || undefined,
+            model,
+            permissionMode
+          })
+        }
+        // New session: task is required
+        else if (task.trim()) {
+          console.log('[NewAgentModal] Creating new remote session:', { remoteHost: selectedSession.user + '@' + selectedSession.host, workdir: selectedSession.workdir })
+
+          agent = await window.api.createRemoteAgent({
+            user: selectedSession.user,
+            host: selectedSession.host,
+            workdir: selectedSession.workdir,
+            sessionName: undefined, // Will be generated
+            task: task.trim(),
+            name: name.trim() || undefined,
+            model,
+            permissionMode
+          })
+        } else {
+          setCreateError('Task is required for new remote sessions')
+          return
+        }
+      }
+
+      console.log('[NewAgentModal] Agent creation successful, closing modal')
+      if (agent && onAgentCreated) {
+        onAgentCreated(agent.id)
+      }
+      onClose()
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : 'Failed to create agent'
+      console.error('[NewAgentModal] Error creating agent:', errorMsg)
+      setCreateError(errorMsg)
+    } finally {
+      setIsCreating(false)
+    }
+  }, [mode, task, name, model, permissionMode, workdir, selectedSession, onClose, onAgentCreated])
 
   const handleImport = useCallback(async () => {
-    if (importMode === 'browse') {
-      // Should have selected a session from the list
-      if (!sessionId || !workdir) return
-    } else if (importMode === 'session') {
-      if (!sessionId.trim() || !workdir) return
-    } else {
-      if (!workdir) return
+    try {
+      setIsCreating(true)
+      setCreateError('')
+
+      if (importMode === 'browse') {
+        // Should have selected a session from the list
+        if (!sessionId || !workdir) return
+      } else if (importMode === 'session') {
+        if (!sessionId.trim() || !workdir) return
+      } else {
+        if (!workdir) return
+      }
+
+      console.log('[NewAgentModal] Importing agent:', { importMode, sessionId, workdir })
+
+      await window.api.importAgent({
+        workdir,
+        name: name.trim() || undefined,
+        sessionId: importMode !== 'continue' ? sessionId.trim() : undefined,
+        continueRecent: importMode === 'continue',
+        model,
+        permissionMode
+      })
+
+      console.log('[NewAgentModal] Import successful, closing modal')
+      onClose()
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : 'Failed to import agent'
+      console.error('[NewAgentModal] Error importing agent:', errorMsg)
+      setCreateError(errorMsg)
+    } finally {
+      setIsCreating(false)
     }
-
-    await window.api.importAgent({
-      workdir,
-      name: name.trim() || undefined,
-      sessionId: importMode !== 'continue' ? sessionId.trim() : undefined,
-      continueRecent: importMode === 'continue',
-      model,
-      permissionMode
-    })
-
-    onClose()
   }, [workdir, name, sessionId, importMode, model, permissionMode, onClose])
 
   const handleSelectSession = useCallback((s: SessionInfo) => {
@@ -234,18 +281,24 @@ export function NewAgentModal({ onClose }: NewAgentModalProps) {
   }, [])
 
   const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
+    async (e: React.KeyboardEvent) => {
       if (e.key === 'Enter' && e.metaKey) {
         e.preventDefault()
-        if (tab === 'new') handleCreate()
-        else handleImport()
+        if (!isCreating) {
+          if (mode === 'local') {
+            if (tab === 'new') await handleCreate()
+            else await handleImport()
+          } else {
+            await handleCreate()
+          }
+        }
       }
       if (e.key === 'Escape') {
         e.preventDefault()
         onClose()
       }
     },
-    [tab, handleCreate, handleImport, onClose]
+    [tab, mode, isCreating, handleCreate, handleImport, onClose]
   )
 
   const filteredSessions = sessions.filter((s) => {
@@ -261,7 +314,7 @@ export function NewAgentModal({ onClose }: NewAgentModalProps) {
   const canCreate =
     mode === 'local'
       ? tab === 'new'
-        ? !!(task.trim() && workdir)
+        ? !!workdir
         : importMode === 'continue'
           ? !!workdir
           : !!(sessionId.trim() && workdir)
@@ -671,7 +724,13 @@ export function NewAgentModal({ onClose }: NewAgentModalProps) {
                 <input
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder={tab === 'new' ? 'Auto-generated from task' : 'Auto-generated from session'}
+                  placeholder={
+                    tab === 'new' && workdir
+                      ? `Folder: ${workdir.split('/').pop()}`
+                      : tab === 'new'
+                        ? 'Auto-generated from task'
+                        : 'Auto-generated from session'
+                  }
                   className="w-full bg-surface-2 border border-border rounded-lg px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-border-focus transition-colors"
                 />
               </div>
@@ -804,6 +863,13 @@ export function NewAgentModal({ onClose }: NewAgentModalProps) {
           )}
         </div>
 
+        {/* Error display */}
+        {createError && (
+          <div className="px-5 py-3 bg-status-error/10 border-t border-status-error/30 text-status-error text-xs">
+            {createError}
+          </div>
+        )}
+
         {/* Footer */}
         <div className="px-5 py-3 border-t border-border flex items-center justify-between shrink-0">
           <span className="text-[10px] text-text-muted">
@@ -816,30 +882,33 @@ export function NewAgentModal({ onClose }: NewAgentModalProps) {
           <div className="flex gap-2">
             <button
               onClick={onClose}
-              className="px-3 py-1.5 text-xs text-text-secondary hover:text-text-primary transition-colors"
+              disabled={isCreating}
+              className="px-3 py-1.5 text-xs text-text-secondary hover:text-text-primary transition-colors disabled:opacity-50"
             >
               Cancel
             </button>
             <button
-              onClick={() => {
+              onClick={async () => {
                 if (mode === 'local') {
-                  tab === 'new' ? handleCreate() : handleImport()
+                  tab === 'new' ? await handleCreate() : await handleImport()
                 } else {
-                  handleCreate()
+                  await handleCreate()
                 }
               }}
-              disabled={!canCreate}
+              disabled={!canCreate || isCreating}
               className="px-4 py-1.5 bg-accent hover:bg-accent-hover disabled:opacity-30 disabled:cursor-not-allowed text-white text-xs font-medium rounded-lg transition-colors"
             >
-              {mode === 'local'
-                ? tab === 'new'
-                  ? 'Create Agent'
-                  : 'Import Session'
-                : selectedSession
-                  ? selectedSession.sessionName
-                    ? 'Attach to Session'
-                    : 'Create Remote Agent'
-                  : 'Discover Sessions'}
+              {isCreating
+                ? 'Creating...'
+                : mode === 'local'
+                  ? tab === 'new'
+                    ? 'Create Agent'
+                    : 'Import Session'
+                  : selectedSession
+                    ? selectedSession.sessionName
+                      ? 'Attach to Session'
+                      : 'Create Remote Agent'
+                    : 'Discover Sessions'}
             </button>
           </div>
         </div>
