@@ -139,8 +139,12 @@ export class SSHConnection {
     const port = this.config.port ? `-p ${this.config.port}` : ''
     const controlMaster = `-o ControlMaster=auto -o ControlPath="${this.controlPath}" -o ControlPersist=300`
 
-    // Quote the remote command properly
-    const quotedCmd = `'${command.replace(/'/g, "'\\''")}'`
+    // Replace ~ with $HOME so it gets expanded on the remote shell
+    const expandedCmd = command.replace(/~/g, '$HOME')
+
+    // Quote the remote command properly with double quotes to allow $HOME expansion
+    // Escape any double quotes and backslashes in the command
+    const quotedCmd = `"${expandedCmd.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/`/g, '\\`')}"`
 
     return `ssh ${port} ${controlMaster} ${user}@${host} ${quotedCmd}`
   }
