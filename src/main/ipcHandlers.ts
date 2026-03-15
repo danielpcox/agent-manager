@@ -464,6 +464,201 @@ function getGlobalStats(): object | null {
   }
 }
 
+// Remote session handlers (over SSH)
+async function parseSessionTranscriptRemote(sessionId: string, workdir: string, remoteHost: string): Promise<TranscriptEntry[]> {
+  const [user, host] = remoteHost.split('@')
+  try {
+    const ssh = await sshPool.getConnection({ user, host })
+
+    // Find the most recent .jsonl file
+    const base = path.join(os.homedir(), '.claude', 'projects', encodeProjectPath(workdir))
+    const findCmd = `ls -t "${base}"/*.jsonl 2>/dev/null | head -1`
+    let filePath: string
+
+    try {
+      filePath = (await ssh.exec(findCmd)).trim()
+      if (!filePath) return []
+    } catch {
+      return []
+    }
+
+    // Read the file content
+    const content = await ssh.exec(`cat "${filePath}"`)
+
+    // Parse like local version
+    const entries: TranscriptEntry[] = []
+    const lines = content.split('\n')
+
+    for (const line of lines) {
+      if (!line.trim()) continue
+      let entry: Record<string, unknown>
+      try { entry = JSON.parse(line) } catch { continue }
+
+      const ts = (entry.timestamp as string) || null
+
+      if (entry.type === 'user' && !entry.isMeta) {
+        const content = (entry.message as Record<string, unknown>)?.content
+        const blocks: TranscriptBlock[] = []
+        if (typeof content === 'string') {
+          if (content.trim()) blocks.push({ type: 'text', content })
+        } else if (Array.isArray(content)) {
+          for (const block of content as Record<string, unknown>[]) {
+            if (block.type === 'text' && block.text) {
+              blocks.push({ type: 'text', content: block.text as string })
+            } else if (block.type === 'tool_result') {
+              const inner = block.content
+              const text = typeof inner === 'string' ? inner
+                : Array.isArray(inner) ? (inner as Record<string, unknown>[]).filter(b => b.type === 'text').map(b => b.text).join('\n')
+                : ''
+              if (text) blocks.push({ type: 'tool_result', content: text })
+            }
+          }
+        }
+        if (blocks.length) entries.push({ role: 'user', timestamp: ts, blocks })
+      }
+
+      if (entry.type === 'assistant') {
+        const content = (entry.message as Record<string, unknown>)?.content
+        if (!Array.isArray(content)) continue
+        const blocks: TranscriptBlock[] = []
+        for (const block of content as Record<string, unknown>[]) {
+          if (block.type === 'thinking' && block.thinking) {
+            blocks.push({ type: 'thinking', content: block.thinking as string })
+          } else if (block.type === 'text' && block.text) {
+            blocks.push({ type: 'text', content: block.text as string })
+          } else if (block.type === 'tool_use' && block.name) {
+            const input = block.input ? JSON.stringify(block.input, null, 2) : ''
+            blocks.push({ type: 'tool_use', content: input, toolName: block.name as string })
+          }
+        }
+        if (blocks.length) entries.push({ role: 'assistant', timestamp: ts, blocks })
+      }
+    }
+
+    return entries
+  } catch (err) {
+    console.error('[parseSessionTranscriptRemote]', err)
+    return []
+  }
+}
+
+async function parseSessionStatsRemote(sessionId: string, workdir: string, remoteHost: string): Promise<SessionStats | null> {
+  const [user, host] = remoteHost.split('@')
+  try {
+    const ssh = await sshPool.getConnection({ user, host })
+
+    // Find the most recent .jsonl file
+    const base = path.join(os.homedir(), '.claude', 'projects', encodeProjectPath(workdir))
+    const findCmd = `ls -t "${base}"/*.jsonl 2>/dev/null | head -1`
+    let filePath: string
+
+    try {
+      filePath = (await ssh.exec(findCmd)).trim()
+      if (!filePath) return null
+    } catch {
+      return null
+    }
+
+    // Read the file content
+    const content = await ssh.exec(`cat "${filePath}"`)
+
+    // Parse like local version
+    const stats: SessionStats = {
+      slug: null,
+      gitBranch: null,
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+      toolCallCount: 0,
+      userMessageCount: 0,
+      filesTouched: [],
+      firstActivity: null,
+      lastActivity: null
+    }
+
+    const filesTouchedSet = new Set<string>()
+    const lines = content.split('\n')
+
+    for (const line of lines) {
+      if (!line.trim()) continue
+      let entry: Record<string, unknown>
+      try {
+        entry = JSON.parse(line)
+      } catch {
+        continue
+      }
+
+      if (!stats.slug && entry.sessionSlug) stats.slug = entry.sessionSlug as string
+      if (!stats.gitBranch && entry.gitBranch) stats.gitBranch = entry.gitBranch as string
+
+      const ts = entry.timestamp as string | undefined
+      if (ts) {
+        if (!stats.firstActivity) stats.firstActivity = ts
+        stats.lastActivity = ts
+      }
+
+      if (entry.type === 'assistant') {
+        const msg = entry.message as Record<string, unknown> | undefined
+        if (msg?.usage) {
+          const usage = msg.usage as Record<string, number>
+          stats.inputTokens += usage.input_tokens || 0
+          stats.outputTokens += usage.output_tokens || 0
+          stats.cacheReadTokens += usage.cache_read_input_tokens || 0
+          stats.cacheCreationTokens += usage.cache_creation_input_tokens || 0
+        }
+        const content = msg?.content
+        if (Array.isArray(content)) {
+          for (const block of content as Record<string, unknown>[]) {
+            if (block?.type === 'tool_use') stats.toolCallCount++
+          }
+        }
+      }
+
+      if (entry.type === 'user' && !entry.isMeta) {
+        stats.userMessageCount++
+      }
+
+      const toolResult = entry.toolUseResult as Record<string, unknown> | undefined
+      if (toolResult?.filePath) {
+        filesTouchedSet.add(toolResult.filePath as string)
+      }
+    }
+
+    stats.filesTouched = [...filesTouchedSet].sort()
+    return stats
+  } catch (err) {
+    console.error('[parseSessionStatsRemote]', err)
+    return null
+  }
+}
+
+async function getSessionMemoryRemote(workdir: string, remoteHost: string): Promise<string | null> {
+  const [user, host] = remoteHost.split('@')
+  try {
+    const ssh = await sshPool.getConnection({ user, host })
+    const base = path.join(os.homedir(), '.claude', 'projects')
+    const memPath = path.join(base, encodeProjectPath(workdir), 'memory', 'MEMORY.md')
+
+    try {
+      const content = await ssh.exec(`cat "${memPath}"`)
+      return content
+    } catch {
+      // Try CLAUDE.md in workdir
+      try {
+        const claudePath = path.join(workdir, 'CLAUDE.md')
+        const content = await ssh.exec(`cat "${claudePath}"`)
+        return content
+      } catch {
+        return null
+      }
+    }
+  } catch (err) {
+    console.error('[getSessionMemoryRemote]', err)
+    return null
+  }
+}
+
 let btopPty: pty.IPty | null = null
 
 export function registerIpcHandlers(agentManager: AgentManager): void {
@@ -607,15 +802,24 @@ export function registerIpcHandlers(agentManager: AgentManager): void {
     return getWebInfo()
   })
 
-  ipcMain.handle('session:getTranscript', async (_e, { sessionId, workdir }) => {
+  ipcMain.handle('session:getTranscript', async (_e, { sessionId, workdir, isRemote, remoteHost }) => {
+    if (isRemote && remoteHost) {
+      return parseSessionTranscriptRemote(sessionId, workdir, remoteHost)
+    }
     return parseSessionTranscript(sessionId, workdir)
   })
 
-  ipcMain.handle('session:getStats', async (_e, { sessionId, workdir }) => {
+  ipcMain.handle('session:getStats', async (_e, { sessionId, workdir, isRemote, remoteHost }) => {
+    if (isRemote && remoteHost) {
+      return parseSessionStatsRemote(sessionId, workdir, remoteHost)
+    }
     return parseSessionStats(sessionId, workdir)
   })
 
-  ipcMain.handle('session:getMemory', async (_e, { workdir }) => {
+  ipcMain.handle('session:getMemory', async (_e, { workdir, isRemote, remoteHost }) => {
+    if (isRemote && remoteHost) {
+      return getSessionMemoryRemote(workdir, remoteHost)
+    }
     return getSessionMemory(workdir)
   })
 

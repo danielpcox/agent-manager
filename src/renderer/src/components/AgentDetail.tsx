@@ -398,7 +398,7 @@ export function AgentDetail() {
 
       {/* Session stats */}
       {activeTab === 'session' && agent.sessionId && (
-        <SessionStatsPanel sessionId={agent.sessionId} workdir={agent.workdir} onSelectFile={setSelectedFile} />
+        <SessionStatsPanel sessionId={agent.sessionId} workdir={agent.workdir} onSelectFile={setSelectedFile} isRemote={agent.isRemote} remoteHost={agent.remoteHost} />
       )}
       {activeTab === 'session' && !agent.sessionId && (
         <div className="flex-1 flex items-center justify-center p-4 text-sm text-text-muted">
@@ -408,7 +408,7 @@ export function AgentDetail() {
 
       {/* Transcript */}
       {activeTab === 'transcript' && agent.sessionId && (
-        <TranscriptPanel sessionId={agent.sessionId} workdir={agent.workdir} onSelectFile={setSelectedFile} />
+        <TranscriptPanel sessionId={agent.sessionId} workdir={agent.workdir} onSelectFile={setSelectedFile} isRemote={agent.isRemote} remoteHost={agent.remoteHost} />
       )}
       {activeTab === 'transcript' && !agent.sessionId && (
         <div className="flex-1 flex items-center justify-center p-4 text-sm text-text-muted">
@@ -417,14 +417,14 @@ export function AgentDetail() {
       )}
 
       {/* Memory */}
-      {activeTab === 'memory' && <MemoryPanel workdir={agent.workdir} />}
+      {activeTab === 'memory' && <MemoryPanel workdir={agent.workdir} isRemote={agent.isRemote} remoteHost={agent.remoteHost} />}
 
       {/* Browse files */}
-      {activeTab === 'browse' && <BrowseFilesPanel workdir={agent.workdir} onSelectFile={setSelectedFile} />}
+      {activeTab === 'browse' && <BrowseFilesPanel workdir={agent.workdir} onSelectFile={setSelectedFile} isRemote={agent.isRemote} remoteHost={agent.remoteHost} />}
 
       {/* File viewer modal */}
       {selectedFile && (
-        <FileViewerModal filePath={selectedFile} workdir={agent.workdir} onClose={() => setSelectedFile(null)} />
+        <FileViewerModal filePath={selectedFile} workdir={agent.workdir} onClose={() => setSelectedFile(null)} isRemote={agent.isRemote} remoteHost={agent.remoteHost} />
       )}
 
       {/* Footer stats */}

@@ -9,9 +9,11 @@ interface FileEntry {
 interface BrowseFilesPanelProps {
   workdir: string
   onSelectFile: (path: string) => void
+  isRemote?: boolean
+  remoteHost?: string
 }
 
-export function BrowseFilesPanel({ workdir, onSelectFile }: BrowseFilesPanelProps) {
+export function BrowseFilesPanel({ workdir, onSelectFile, isRemote, remoteHost }: BrowseFilesPanelProps) {
   const [files, setFiles] = useState<FileEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -21,7 +23,7 @@ export function BrowseFilesPanel({ workdir, onSelectFile }: BrowseFilesPanelProp
     setLoading(true)
     setError(null)
     window.api
-      .listDir(workdir, workdir)
+      .listDir(workdir, workdir, isRemote, remoteHost)
       .then((result) => {
         setFiles(result.files || [])
         setLoading(false)
@@ -30,7 +32,7 @@ export function BrowseFilesPanel({ workdir, onSelectFile }: BrowseFilesPanelProp
         setError(err instanceof Error ? err.message : String(err))
         setLoading(false)
       })
-  }, [workdir])
+  }, [workdir, isRemote, remoteHost])
 
   const formatSize = (bytes: number) => {
     if (bytes === 0) return '-'
