@@ -502,7 +502,7 @@ async function parseSessionTranscriptRemote(sessionId: string, workdir: string, 
 
     // Read the file content
     debugLog(`[parseSessionTranscriptRemote] Reading file: ${filePath}`)
-    const content = await ssh.exec(`cat "${filePath}"`)
+    const content = await ssh.exec(`cat ${filePath}`)
 
     // Parse like local version
     const entries: TranscriptEntry[] = []
@@ -590,7 +590,7 @@ async function parseSessionStatsRemote(sessionId: string, workdir: string, remot
     }
 
     // Read the file content
-    const content = await ssh.exec(`cat "${filePath}"`)
+    const content = await ssh.exec(`cat ${filePath}`)
 
     // Parse like local version
     const stats: SessionStats = {
@@ -673,14 +673,14 @@ async function getSessionMemoryRemote(workdir: string, remoteHost: string): Prom
     debugLog(`[getSessionMemoryRemote] Looking for memory at ${memPath} on ${remoteHost}`)
 
     try {
-      const content = await ssh.exec(`cat "${memPath}"`)
+      const content = await ssh.exec(`cat ${memPath}`)
       debugLog(`[getSessionMemoryRemote] Found memory file, ${content.length} bytes`)
       return content
     } catch (err) {
       debugLog(`[getSessionMemoryRemote] Failed to read memory: ${err}`)
       // Try CLAUDE.md in workdir
       try {
-        const content = await ssh.exec(`cat "${workdir}/CLAUDE.md"`)
+        const content = await ssh.exec(`cat ${workdir}/CLAUDE.md`)
         debugLog(`[getSessionMemoryRemote] Found CLAUDE.md, ${content.length} bytes`)
         return content
       } catch {
@@ -912,7 +912,7 @@ export function registerIpcHandlers(agentManager: AgentManager): void {
         // Use cat to read the file
         let content = ''
         try {
-          content = await ssh.exec(`cat "${filePath}" 2>/dev/null || echo ""`)
+          content = await ssh.exec(`cat ${filePath} 2>/dev/null || echo ""`)
         } catch (err) {
           throw new Error(`Failed to read remote file: ${err}`)
         }
