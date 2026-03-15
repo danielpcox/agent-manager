@@ -29,6 +29,12 @@ export function AgentDetail() {
   const [activeTab, setActiveTab] = useState<'terminal' | 'session' | 'transcript' | 'memory' | 'browse'>('terminal')
   const [selectedFile, setSelectedFile] = useState<string | null>(null)
 
+  useEffect(() => {
+    if (agent) {
+      console.log('[AgentDetail] Selected agent:', { id: agent.id, name: agent.name, isRemote: agent.isRemote, remoteHost: agent.remoteHost, workdir: agent.workdir })
+    }
+  }, [agent?.id])
+
   // Reset tab when agent changes
   useEffect(() => { setActiveTab('terminal') }, [agent?.id])
 

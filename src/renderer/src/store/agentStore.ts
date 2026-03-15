@@ -31,8 +31,10 @@ const statusPriority: Record<AgentStatus, number> = {
   error: 1,
   running: 2,
   starting: 3,
+  reconnecting: 3.5,
   done: 4,
-  killed: 5
+  killed: 5,
+  disconnected: 5.5
 }
 
 export const useAgentStore = create<AgentStore>((set, get) => ({

@@ -1064,15 +1064,11 @@ export class AgentManager {
       const managed: ManagedAgent = { agent, pty: null, outputBuffer: '', tmuxSession, idleTimer: null, suppressDetectionUntil: 0, firstActivityAt: 0, terminalTabActive: true }
       this.agents.set(agent.id, managed)
 
-      // Handle remote agents
+      // Handle remote agents — always try to reconnect if we have a session name
       if (agent.isRemote && agent.remoteHost && agent.remoteSessionName) {
-        if (wasActive) {
-          console.log(`[AgentManager] Attempting to reconnect to remote session "${agent.remoteSessionName}" on ${agent.remoteHost}`)
-          agent.status = 'starting'
-          this.spawnRemotePty(managed)
-        } else {
-          agent.status = 'disconnected'
-        }
+        console.log(`[AgentManager] Attempting to reconnect to remote session "${agent.remoteSessionName}" on ${agent.remoteHost} (status was: ${agent.status})`)
+        agent.status = 'starting'
+        this.spawnRemotePty(managed)
       } else if (this.tmuxSessionExists(tmuxSession)) {
         // tmux session still alive — just reattach (full scrollback comes from tmux)
         console.log(`[AgentManager] Reattaching to live tmux session "${tmuxSession}" for "${agent.name}"`)

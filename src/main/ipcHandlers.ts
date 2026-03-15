@@ -9,6 +9,18 @@ import { AgentManager } from './agentManager'
 import { getWebInfo } from './webServer'
 import { sshPool } from './sshConnection'
 
+// Debug logging
+const debugLogPath = path.join(os.homedir(), '.agent-manager-debug.log')
+function debugLog(msg: string) {
+  const timestamp = new Date().toISOString()
+  console.log(`[${timestamp}] ${msg}`)
+  try {
+    fs.appendFileSync(debugLogPath, `[${timestamp}] ${msg}\n`)
+  } catch (e) {
+    // ignore
+  }
+}
+
 interface SessionInfo {
   sessionId: string
   project: string
@@ -472,21 +484,24 @@ async function parseSessionTranscriptRemote(sessionId: string, workdir: string, 
 
     // Find the most recent .jsonl file (use ~ to expand to remote home dir)
     const encodedPath = encodeProjectPath(workdir)
+    debugLog(`[parseSessionTranscriptRemote] Looking for files at ~/.claude/projects/${encodedPath}/*.jsonl on ${remoteHost}`)
     const findCmd = `ls -t ~/.claude/projects/${encodedPath}/*.jsonl 2>/dev/null | head -1`
     let filePath: string
 
     try {
       filePath = (await ssh.exec(findCmd)).trim()
+      debugLog(`[parseSessionTranscriptRemote] Found file: ${filePath}`)
       if (!filePath) {
-        console.log(`[parseSessionTranscriptRemote] No session files found in ~/.claude/projects/${encodedPath}`)
+        debugLog(`[parseSessionTranscriptRemote] No session files found in ~/.claude/projects/${encodedPath}`)
         return []
       }
     } catch (err) {
-      console.error(`[parseSessionTranscriptRemote] Failed to find session files:`, err)
+      debugLog(`[parseSessionTranscriptRemote] Failed to find session files: ${err}`)
       return []
     }
 
     // Read the file content
+    debugLog(`[parseSessionTranscriptRemote] Reading file: ${filePath}`)
     const content = await ssh.exec(`cat "${filePath}"`)
 
     // Parse like local version
@@ -814,6 +829,7 @@ export function registerIpcHandlers(agentManager: AgentManager): void {
   })
 
   ipcMain.handle('session:getTranscript', async (_e, { sessionId, workdir, isRemote, remoteHost }) => {
+    debugLog(`[IPC] session:getTranscript called: sessionId=${sessionId}, workdir=${workdir}, isRemote=${isRemote}, remoteHost=${remoteHost}`)
     if (isRemote && remoteHost) {
       return parseSessionTranscriptRemote(sessionId, workdir, remoteHost)
     }

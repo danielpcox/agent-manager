@@ -140,6 +140,7 @@ export function TranscriptPanel({ sessionId, workdir, onSelectFile, isRemote, re
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
+    console.log('[TranscriptPanel] Props:', { sessionId, workdir, isRemote, remoteHost })
     setLoading(true)
     window.api.getSessionTranscript(sessionId, workdir, isRemote, remoteHost)
       .then((e) => {
