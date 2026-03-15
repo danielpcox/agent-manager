@@ -23,6 +23,7 @@ const api = {
     ipcRenderer.invoke('agent:enableRemoteControl', { agentId }),
   killAgent: (agentId: string) => ipcRenderer.invoke('agent:kill', { agentId }),
   removeAgent: (agentId: string) => ipcRenderer.invoke('agent:remove', { agentId }),
+  retryRemoteConnection: (agentId: string) => ipcRenderer.invoke('agent:retryRemoteConnection', { agentId }),
   markRead: (agentId: string) => ipcRenderer.invoke('agent:markRead', { agentId }),
   renameAgent: (agentId: string, name: string) =>
     ipcRenderer.invoke('agent:rename', { agentId, name }),
@@ -92,12 +93,12 @@ const api = {
   },
 
   // Session intelligence
-  getSessionTranscript: (sessionId: string, workdir: string) =>
-    ipcRenderer.invoke('session:getTranscript', { sessionId, workdir }),
-  getSessionStats: (sessionId: string, workdir: string) =>
-    ipcRenderer.invoke('session:getStats', { sessionId, workdir }),
-  getSessionMemory: (workdir: string) =>
-    ipcRenderer.invoke('session:getMemory', { workdir }),
+  getSessionTranscript: (sessionId: string, workdir: string, isRemote?: boolean, remoteHost?: string) =>
+    ipcRenderer.invoke('session:getTranscript', { sessionId, workdir, isRemote, remoteHost }),
+  getSessionStats: (sessionId: string, workdir: string, isRemote?: boolean, remoteHost?: string) =>
+    ipcRenderer.invoke('session:getStats', { sessionId, workdir, isRemote, remoteHost }),
+  getSessionMemory: (workdir: string, isRemote?: boolean, remoteHost?: string) =>
+    ipcRenderer.invoke('session:getMemory', { workdir, isRemote, remoteHost }),
   getGlobalStats: () => ipcRenderer.invoke('stats:getGlobal'),
 
   // File reading and browsing

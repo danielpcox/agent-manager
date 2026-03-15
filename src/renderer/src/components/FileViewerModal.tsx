@@ -4,9 +4,11 @@ interface FileViewerModalProps {
   filePath: string
   workdir: string
   onClose: () => void
+  isRemote?: boolean
+  remoteHost?: string
 }
 
-export function FileViewerModal({ filePath, workdir, onClose }: FileViewerModalProps) {
+export function FileViewerModal({ filePath, workdir, onClose, isRemote, remoteHost }: FileViewerModalProps) {
   const [content, setContent] = useState<string>('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -16,7 +18,7 @@ export function FileViewerModal({ filePath, workdir, onClose }: FileViewerModalP
     setLoading(true)
     setError(null)
     window.api
-      .readFile(filePath, workdir)
+      .readFile(filePath, workdir, isRemote, remoteHost)
       .then((result) => {
         setContent(result.content)
         setSize(result.size)
@@ -26,7 +28,7 @@ export function FileViewerModal({ filePath, workdir, onClose }: FileViewerModalP
         setError(err instanceof Error ? err.message : String(err))
         setLoading(false)
       })
-  }, [filePath, workdir])
+  }, [filePath, workdir, isRemote, remoteHost])
 
   const formatSize = (bytes: number) => {
     if (bytes < 1024) return `${bytes} B`

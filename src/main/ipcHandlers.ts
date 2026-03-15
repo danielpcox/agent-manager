@@ -9,6 +9,18 @@ import { AgentManager } from './agentManager'
 import { getWebInfo } from './webServer'
 import { sshPool } from './sshConnection'
 
+// Debug logging
+const debugLogPath = path.join(os.homedir(), '.agent-manager-debug.log')
+function debugLog(msg: string) {
+  const timestamp = new Date().toISOString()
+  console.log(`[${timestamp}] ${msg}`)
+  try {
+    fs.appendFileSync(debugLogPath, `[${timestamp}] ${msg}\n`)
+  } catch (e) {
+    // ignore
+  }
+}
+
 interface SessionInfo {
   sessionId: string
   project: string
@@ -156,21 +168,30 @@ async function discoverRemoteSessions(
   keyPath?: string
 ): Promise<{ sessions: RemoteSessionInfo[]; canConnect: boolean }> {
   try {
+    console.log(`[Discovery] Starting session discovery for ${user}@${host}`)
+
     // Get or create SSH connection
     const ssh = await sshPool.getConnection({ user, host, keyPath })
+    console.log(`[Discovery] SSH connection obtained`)
 
     // Test connection
     const testResult = await ssh.ping()
     if (!testResult) {
-      throw new Error('SSH connection test failed')
+      throw new Error(
+        `Cannot connect to ${user}@${host}. Check SSH configuration, network connectivity, and that the host is reachable.`
+      )
     }
+    console.log(`[Discovery] SSH connection test passed`)
 
     // List tmux sessions on remote: tmux list-sessions -F "#{session_name}|#{pane_current_path}"
     let sessionsOutput = ''
     try {
+      console.log(`[Discovery] Listing tmux sessions...`)
       sessionsOutput = await ssh.exec(`tmux list-sessions -F "#{session_name}|#{pane_current_path}" 2>/dev/null || echo ""`)
-    } catch {
+      console.log(`[Discovery] Tmux output: ${sessionsOutput}`)
+    } catch (err) {
       // tmux might not be running any sessions
+      console.log(`[Discovery] Tmux command failed (might not have sessions):`, err)
       sessionsOutput = ''
     }
 
@@ -182,31 +203,46 @@ async function discoverRemoteSessions(
       const [sessionName, workdir] = line.split('|')
       if (!sessionName) continue
 
-      // Check if this tmux session is running Claude by examining the pane's command
-      try {
-        const pidOutput = await ssh.exec(
-          `tmux list-panes -t "${sessionName}" -F "#{pane_pid}" 2>/dev/null | head -1 || echo ""`
-        )
-        const pid = pidOutput.trim()
-        if (!pid) continue
+      console.log(`[Discovery] Checking session "${sessionName}" at ${workdir}...`)
 
-        const procCmd = await ssh.exec(`ps -p ${pid} -o command= 2>/dev/null || echo ""`)
-        if (procCmd.includes('claude')) {
+      // Get the current command in the main pane of this session
+      try {
+        const paneInfoOutput = await ssh.exec(
+          `tmux list-panes -t "${sessionName}" -F "#{pane_current_command}" 2>/dev/null | head -1 || echo ""`
+        )
+        const paneCommand = paneInfoOutput.trim()
+        console.log(`[Discovery] Session "${sessionName}" pane command: ${paneCommand}`)
+
+        // Include the session if it has Claude or other useful commands
+        if (paneCommand === 'claude' || paneCommand === 'bash' || paneCommand === '') {
+          console.log(`[Discovery] ✓ Including session: "${sessionName}" (${paneCommand || 'shell'})`)
+          claudeSessions.push({
+            sessionName,
+            workdir: workdir || '(unknown)'
+          })
+        } else {
+          console.log(`[Discovery] ℹ Including session: "${sessionName}" (${paneCommand})`)
           claudeSessions.push({
             sessionName,
             workdir: workdir || '(unknown)'
           })
         }
-      } catch {
-        // Skip sessions we can't inspect
+      } catch (err) {
+        // Include sessions even if we can't inspect them
+        console.log(`[Discovery] Error checking session "${sessionName}" but including it anyway:`, err)
+        claudeSessions.push({
+          sessionName,
+          workdir: workdir || '(unknown)'
+        })
       }
     }
 
+    console.log(`[Discovery] Found ${claudeSessions.length} tmux sessions`)
     return { sessions: claudeSessions, canConnect: true }
   } catch (err) {
-    throw new Error(
-      `Failed to discover remote sessions: ${err instanceof Error ? err.message : String(err)}`
-    )
+    const message = err instanceof Error ? err.message : String(err)
+    console.error(`[Discovery] Failed to discover remote sessions: ${message}`)
+    throw new Error(`Failed to discover remote sessions: ${message}`)
   }
 }
 
@@ -440,6 +476,224 @@ function getGlobalStats(): object | null {
   }
 }
 
+// Remote session handlers (over SSH)
+async function parseSessionTranscriptRemote(sessionId: string, workdir: string, remoteHost: string): Promise<TranscriptEntry[]> {
+  const [user, host] = remoteHost.split('@')
+  try {
+    const ssh = await sshPool.getConnection({ user, host })
+
+    // Find the most recent .jsonl file (use ~ to expand to remote home dir)
+    const encodedPath = encodeProjectPath(workdir)
+    debugLog(`[parseSessionTranscriptRemote] Looking for files at ~/.claude/projects/${encodedPath}/*.jsonl on ${remoteHost}`)
+    const findCmd = `ls -t ~/.claude/projects/${encodedPath}/*.jsonl 2>/dev/null | head -1`
+    let filePath: string
+
+    try {
+      filePath = (await ssh.exec(findCmd)).trim()
+      debugLog(`[parseSessionTranscriptRemote] Found file: ${filePath}`)
+      if (!filePath) {
+        debugLog(`[parseSessionTranscriptRemote] No session files found in ~/.claude/projects/${encodedPath}`)
+        return []
+      }
+    } catch (err) {
+      debugLog(`[parseSessionTranscriptRemote] Failed to find session files: ${err}`)
+      return []
+    }
+
+    // Read the file content
+    debugLog(`[parseSessionTranscriptRemote] Reading file: ${filePath}`)
+    const content = await ssh.exec(`cat ${filePath}`)
+
+    // Parse like local version
+    const entries: TranscriptEntry[] = []
+    const lines = content.split('\n')
+    let lineCount = 0
+
+    for (const line of lines) {
+      if (!line.trim()) continue
+      lineCount++
+      let entry: Record<string, unknown>
+      try { entry = JSON.parse(line) } catch (e) {
+        debugLog(`[parseSessionTranscriptRemote] Failed to parse line ${lineCount}: ${e}`)
+        continue
+      }
+
+      const ts = (entry.timestamp as string) || null
+      const entryType = entry.type as string
+
+      if (entry.type === 'user' && !entry.isMeta) {
+        const content = (entry.message as Record<string, unknown>)?.content
+        const blocks: TranscriptBlock[] = []
+        if (typeof content === 'string') {
+          if (content.trim()) blocks.push({ type: 'text', content })
+        } else if (Array.isArray(content)) {
+          for (const block of content as Record<string, unknown>[]) {
+            if (block.type === 'text' && block.text) {
+              blocks.push({ type: 'text', content: block.text as string })
+            } else if (block.type === 'tool_result') {
+              const inner = block.content
+              const text = typeof inner === 'string' ? inner
+                : Array.isArray(inner) ? (inner as Record<string, unknown>[]).filter(b => b.type === 'text').map(b => b.text).join('\n')
+                : ''
+              if (text) blocks.push({ type: 'tool_result', content: text })
+            }
+          }
+        }
+        if (blocks.length) entries.push({ role: 'user', timestamp: ts, blocks })
+      }
+
+      if (entry.type === 'assistant') {
+        const content = (entry.message as Record<string, unknown>)?.content
+        if (!Array.isArray(content)) continue
+        const blocks: TranscriptBlock[] = []
+        for (const block of content as Record<string, unknown>[]) {
+          if (block.type === 'thinking' && block.thinking) {
+            blocks.push({ type: 'thinking', content: block.thinking as string })
+          } else if (block.type === 'text' && block.text) {
+            blocks.push({ type: 'text', content: block.text as string })
+          } else if (block.type === 'tool_use' && block.name) {
+            const input = block.input ? JSON.stringify(block.input, null, 2) : ''
+            blocks.push({ type: 'tool_use', content: input, toolName: block.name as string })
+          }
+        }
+        if (blocks.length) entries.push({ role: 'assistant', timestamp: ts, blocks })
+      }
+    }
+
+    debugLog(`[parseSessionTranscriptRemote] Parsed ${lineCount} lines, found ${entries.length} transcript entries`)
+    return entries
+  } catch (err) {
+    console.error('[parseSessionTranscriptRemote]', err)
+    return []
+  }
+}
+
+async function parseSessionStatsRemote(sessionId: string, workdir: string, remoteHost: string): Promise<SessionStats | null> {
+  const [user, host] = remoteHost.split('@')
+  try {
+    const ssh = await sshPool.getConnection({ user, host })
+
+    // Find the most recent .jsonl file (use ~ to expand to remote home dir)
+    const encodedPath = encodeProjectPath(workdir)
+    const findCmd = `ls -t ~/.claude/projects/${encodedPath}/*.jsonl 2>/dev/null | head -1`
+    let filePath: string
+
+    try {
+      filePath = (await ssh.exec(findCmd)).trim()
+      if (!filePath) {
+        console.log(`[parseSessionStatsRemote] No session files found in ~/.claude/projects/${encodedPath}`)
+        return null
+      }
+    } catch (err) {
+      console.error(`[parseSessionStatsRemote] Failed to find session files:`, err)
+      return null
+    }
+
+    // Read the file content
+    const content = await ssh.exec(`cat ${filePath}`)
+
+    // Parse like local version
+    const stats: SessionStats = {
+      slug: null,
+      gitBranch: null,
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+      toolCallCount: 0,
+      userMessageCount: 0,
+      filesTouched: [],
+      firstActivity: null,
+      lastActivity: null
+    }
+
+    const filesTouchedSet = new Set<string>()
+    const lines = content.split('\n')
+
+    for (const line of lines) {
+      if (!line.trim()) continue
+      let entry: Record<string, unknown>
+      try {
+        entry = JSON.parse(line)
+      } catch {
+        continue
+      }
+
+      if (!stats.slug && entry.sessionSlug) stats.slug = entry.sessionSlug as string
+      if (!stats.gitBranch && entry.gitBranch) stats.gitBranch = entry.gitBranch as string
+
+      const ts = entry.timestamp as string | undefined
+      if (ts) {
+        if (!stats.firstActivity) stats.firstActivity = ts
+        stats.lastActivity = ts
+      }
+
+      if (entry.type === 'assistant') {
+        const msg = entry.message as Record<string, unknown> | undefined
+        if (msg?.usage) {
+          const usage = msg.usage as Record<string, number>
+          stats.inputTokens += usage.input_tokens || 0
+          stats.outputTokens += usage.output_tokens || 0
+          stats.cacheReadTokens += usage.cache_read_input_tokens || 0
+          stats.cacheCreationTokens += usage.cache_creation_input_tokens || 0
+        }
+        const content = msg?.content
+        if (Array.isArray(content)) {
+          for (const block of content as Record<string, unknown>[]) {
+            if (block?.type === 'tool_use') stats.toolCallCount++
+          }
+        }
+      }
+
+      if (entry.type === 'user' && !entry.isMeta) {
+        stats.userMessageCount++
+      }
+
+      const toolResult = entry.toolUseResult as Record<string, unknown> | undefined
+      if (toolResult?.filePath) {
+        filesTouchedSet.add(toolResult.filePath as string)
+      }
+    }
+
+    stats.filesTouched = [...filesTouchedSet].sort()
+    return stats
+  } catch (err) {
+    console.error('[parseSessionStatsRemote]', err)
+    return null
+  }
+}
+
+async function getSessionMemoryRemote(workdir: string, remoteHost: string): Promise<string | null> {
+  const [user, host] = remoteHost.split('@')
+  try {
+    const ssh = await sshPool.getConnection({ user, host })
+    const encodedPath = encodeProjectPath(workdir)
+    const memPath = `~/.claude/projects/${encodedPath}/memory/MEMORY.md`
+
+    debugLog(`[getSessionMemoryRemote] Looking for memory at ${memPath} on ${remoteHost}`)
+
+    try {
+      const content = await ssh.exec(`cat ${memPath}`)
+      debugLog(`[getSessionMemoryRemote] Found memory file, ${content.length} bytes`)
+      return content
+    } catch (err) {
+      debugLog(`[getSessionMemoryRemote] Failed to read memory: ${err}`)
+      // Try CLAUDE.md in workdir
+      try {
+        const content = await ssh.exec(`cat ${workdir}/CLAUDE.md`)
+        debugLog(`[getSessionMemoryRemote] Found CLAUDE.md, ${content.length} bytes`)
+        return content
+      } catch {
+        debugLog(`[getSessionMemoryRemote] No memory files found`)
+        return null
+      }
+    }
+  } catch (err) {
+    debugLog(`[getSessionMemoryRemote] Error: ${err}`)
+    return null
+  }
+}
+
 let btopPty: pty.IPty | null = null
 
 export function registerIpcHandlers(agentManager: AgentManager): void {
@@ -493,6 +747,10 @@ export function registerIpcHandlers(agentManager: AgentManager): void {
 
   ipcMain.handle('agent:remove', async (_event, { agentId }) => {
     agentManager.removeAgent(agentId)
+  })
+
+  ipcMain.handle('agent:retryRemoteConnection', async (_event, { agentId }) => {
+    agentManager.retryRemoteConnection(agentId)
   })
 
   ipcMain.handle('agent:markRead', async (_event, { agentId }) => {
@@ -583,15 +841,26 @@ export function registerIpcHandlers(agentManager: AgentManager): void {
     return getWebInfo()
   })
 
-  ipcMain.handle('session:getTranscript', async (_e, { sessionId, workdir }) => {
+  ipcMain.handle('session:getTranscript', async (_e, { sessionId, workdir, isRemote, remoteHost }) => {
+    debugLog(`[IPC] session:getTranscript called: sessionId=${sessionId}, workdir=${workdir}, isRemote=${isRemote}, remoteHost=${remoteHost}`)
+    if (isRemote && remoteHost) {
+      return parseSessionTranscriptRemote(sessionId, workdir, remoteHost)
+    }
     return parseSessionTranscript(sessionId, workdir)
   })
 
-  ipcMain.handle('session:getStats', async (_e, { sessionId, workdir }) => {
+  ipcMain.handle('session:getStats', async (_e, { sessionId, workdir, isRemote, remoteHost }) => {
+    if (isRemote && remoteHost) {
+      return parseSessionStatsRemote(sessionId, workdir, remoteHost)
+    }
     return parseSessionStats(sessionId, workdir)
   })
 
-  ipcMain.handle('session:getMemory', async (_e, { workdir }) => {
+  ipcMain.handle('session:getMemory', async (_e, { workdir, isRemote, remoteHost }) => {
+    debugLog(`[IPC] session:getMemory called: workdir=${workdir}, isRemote=${isRemote}, remoteHost=${remoteHost}`)
+    if (isRemote && remoteHost) {
+      return getSessionMemoryRemote(workdir, remoteHost)
+    }
     return getSessionMemory(workdir)
   })
 
@@ -643,7 +912,7 @@ export function registerIpcHandlers(agentManager: AgentManager): void {
         // Use cat to read the file
         let content = ''
         try {
-          content = await ssh.exec(`cat "${filePath}" 2>/dev/null || echo ""`)
+          content = await ssh.exec(`cat ${filePath} 2>/dev/null || echo ""`)
         } catch (err) {
           throw new Error(`Failed to read remote file: ${err}`)
         }
@@ -695,17 +964,21 @@ export function registerIpcHandlers(agentManager: AgentManager): void {
         const [user, host] = remoteHost.split('@')
         const ssh = await sshPool.getConnection({ user, host })
 
+        debugLog(`[file:listDir] Listing remote files: ${dirPath} on ${remoteHost}`)
+
         // Use find to list files: find /dir -type f | head -1000
         const ignorePatterns = Array.from(IGNORE_DIRS)
-          .map((d) => `'! -path "*/${d}/*"'`)
+          .map((d) => `! -path "*/${d}/*"`)
           .join(' ')
 
-        const findCmd = `find "${dirPath}" -type f ${ignorePatterns} 2>/dev/null | head -1000`
+        const findCmd = `find ${dirPath} -type f ${ignorePatterns} 2>/dev/null | head -1000`
         let output = ''
         try {
           output = await ssh.exec(findCmd)
-        } catch {
+          debugLog(`[file:listDir] Found ${output.split('\n').filter(l => l.trim()).length} files`)
+        } catch (err) {
           // Directory might not exist or be inaccessible
+          debugLog(`[file:listDir] Failed to list directory: ${err}`)
           return { files: [] }
         }
 

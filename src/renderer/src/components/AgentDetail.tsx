@@ -29,6 +29,12 @@ export function AgentDetail() {
   const [activeTab, setActiveTab] = useState<'terminal' | 'session' | 'transcript' | 'memory' | 'browse'>('terminal')
   const [selectedFile, setSelectedFile] = useState<string | null>(null)
 
+  useEffect(() => {
+    if (agent) {
+      console.log('[AgentDetail] Selected agent:', { id: agent.id, name: agent.name, isRemote: agent.isRemote, remoteHost: agent.remoteHost, workdir: agent.workdir })
+    }
+  }, [agent?.id])
+
   // Reset tab when agent changes
   useEffect(() => { setActiveTab('terminal') }, [agent?.id])
 
@@ -194,7 +200,17 @@ export function AgentDetail() {
           flushPending()
         })
       } else {
-        if (['killed', 'done', 'error'].includes(agent.status)) {
+        if (agent.isRemote && agent.status === 'disconnected') {
+          terminal.write(
+            '\x1b[33m SSH Connection Lost\x1b[0m\r\n' +
+            '\x1b[90m Remote session output not available.\r\n' +
+            ' Click the "Retry" button to reconnect.\x1b[0m\r\n'
+          )
+        } else if (agent.status === 'starting' && agent.isRemote) {
+          terminal.write(
+            '\x1b[36m Connecting to remote session...\x1b[0m\r\n'
+          )
+        } else if (['killed', 'done', 'error'].includes(agent.status)) {
           terminal.write(
             '\x1b[90m Session output not available (restored from previous app session).\r\n' +
             ' Use Import Session to reconnect.\x1b[0m\r\n'
@@ -336,10 +352,7 @@ export function AgentDetail() {
           )}
           {agent.status === 'disconnected' && (
             <button
-              onClick={() => {
-                // Trigger reconnection by spawning remote PTY again
-                window.api.resizePty(agent.id, 120, 40)
-              }}
+              onClick={() => window.api.retryRemoteConnection(agent.id)}
               className="px-2 py-1 text-xs text-text-secondary hover:text-accent border border-border hover:border-accent/50 rounded-md transition-colors"
               title="Attempt to reconnect to remote session"
             >
@@ -397,34 +410,34 @@ export function AgentDetail() {
       </div>
 
       {/* Session stats */}
-      {activeTab === 'session' && agent.sessionId && (
-        <SessionStatsPanel sessionId={agent.sessionId} workdir={agent.workdir} onSelectFile={setSelectedFile} />
+      {activeTab === 'session' && (agent.sessionId || agent.isRemote) && (
+        <SessionStatsPanel sessionId={agent.sessionId} workdir={agent.workdir} onSelectFile={setSelectedFile} isRemote={agent.isRemote} remoteHost={agent.remoteHost} />
       )}
-      {activeTab === 'session' && !agent.sessionId && (
+      {activeTab === 'session' && !agent.sessionId && !agent.isRemote && (
         <div className="flex-1 flex items-center justify-center p-4 text-sm text-text-muted">
           No session ID yet — agent may still be starting.
         </div>
       )}
 
       {/* Transcript */}
-      {activeTab === 'transcript' && agent.sessionId && (
-        <TranscriptPanel sessionId={agent.sessionId} workdir={agent.workdir} onSelectFile={setSelectedFile} />
+      {activeTab === 'transcript' && (agent.sessionId || agent.isRemote) && (
+        <TranscriptPanel sessionId={agent.sessionId} workdir={agent.workdir} onSelectFile={setSelectedFile} isRemote={agent.isRemote} remoteHost={agent.remoteHost} />
       )}
-      {activeTab === 'transcript' && !agent.sessionId && (
+      {activeTab === 'transcript' && !agent.sessionId && !agent.isRemote && (
         <div className="flex-1 flex items-center justify-center p-4 text-sm text-text-muted">
           No session ID yet — agent may still be starting.
         </div>
       )}
 
       {/* Memory */}
-      {activeTab === 'memory' && <MemoryPanel workdir={agent.workdir} />}
+      {activeTab === 'memory' && <MemoryPanel workdir={agent.workdir} isRemote={agent.isRemote} remoteHost={agent.remoteHost} />}
 
       {/* Browse files */}
-      {activeTab === 'browse' && <BrowseFilesPanel workdir={agent.workdir} onSelectFile={setSelectedFile} />}
+      {activeTab === 'browse' && <BrowseFilesPanel workdir={agent.workdir} onSelectFile={setSelectedFile} isRemote={agent.isRemote} remoteHost={agent.remoteHost} />}
 
       {/* File viewer modal */}
       {selectedFile && (
-        <FileViewerModal filePath={selectedFile} workdir={agent.workdir} onClose={() => setSelectedFile(null)} />
+        <FileViewerModal filePath={selectedFile} workdir={agent.workdir} onClose={() => setSelectedFile(null)} isRemote={agent.isRemote} remoteHost={agent.remoteHost} />
       )}
 
       {/* Footer stats */}

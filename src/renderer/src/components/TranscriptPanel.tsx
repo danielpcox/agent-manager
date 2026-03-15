@@ -5,6 +5,8 @@ interface Props {
   sessionId: string
   workdir: string
   onSelectFile?: (filePath: string) => void
+  isRemote?: boolean
+  remoteHost?: string
 }
 
 // Detect absolute file paths in text (e.g. /path/to/file.txt, /Users/name/project/src/app.ts)
@@ -132,14 +134,15 @@ function EntryView({ entry, onSelectFile }: { entry: TranscriptEntry; onSelectFi
   )
 }
 
-export function TranscriptPanel({ sessionId, workdir, onSelectFile }: Props) {
+export function TranscriptPanel({ sessionId, workdir, onSelectFile, isRemote, remoteHost }: Props) {
   const [entries, setEntries] = useState<TranscriptEntry[]>([])
   const [loading, setLoading] = useState(true)
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
+    console.log('[TranscriptPanel] Props:', { sessionId, workdir, isRemote, remoteHost })
     setLoading(true)
-    window.api.getSessionTranscript(sessionId, workdir)
+    window.api.getSessionTranscript(sessionId, workdir, isRemote, remoteHost)
       .then((e) => {
         setEntries(e as TranscriptEntry[])
         setLoading(false)

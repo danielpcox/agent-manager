@@ -2,18 +2,20 @@ import { useEffect, useState } from 'react'
 
 interface Props {
   workdir: string
+  isRemote?: boolean
+  remoteHost?: string
 }
 
-export function MemoryPanel({ workdir }: Props) {
+export function MemoryPanel({ workdir, isRemote, remoteHost }: Props) {
   const [content, setContent] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     setLoading(true)
-    window.api.getSessionMemory(workdir)
+    window.api.getSessionMemory(workdir, isRemote, remoteHost)
       .then((c) => { setContent(c as string | null); setLoading(false) })
       .catch(() => setLoading(false))
-  }, [workdir])
+  }, [workdir, isRemote, remoteHost])
 
   if (loading) {
     return (

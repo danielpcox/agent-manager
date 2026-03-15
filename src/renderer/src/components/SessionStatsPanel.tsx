@@ -5,6 +5,8 @@ interface Props {
   sessionId: string
   workdir: string
   onSelectFile?: (filePath: string) => void
+  isRemote?: boolean
+  remoteHost?: string
 }
 
 function formatDate(iso: string): string {
@@ -20,16 +22,16 @@ function relPath(filePath: string, workdir: string): string {
   return filePath
 }
 
-export function SessionStatsPanel({ sessionId, workdir, onSelectFile }: Props) {
+export function SessionStatsPanel({ sessionId, workdir, onSelectFile, isRemote, remoteHost }: Props) {
   const [stats, setStats] = useState<SessionStats | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     setLoading(true)
-    window.api.getSessionStats(sessionId, workdir)
+    window.api.getSessionStats(sessionId, workdir, isRemote, remoteHost)
       .then((s) => { setStats(s as SessionStats | null); setLoading(false) })
       .catch(() => setLoading(false))
-  }, [sessionId, workdir])
+  }, [sessionId, workdir, isRemote, remoteHost])
 
   if (loading) {
     return (

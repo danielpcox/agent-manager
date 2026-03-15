@@ -65,7 +65,8 @@ export class SSHConnection {
     try {
       const result = execSync(sshCmd, {
         encoding: 'utf-8',
-        timeout: 30000, // 30 second timeout
+        timeout: 120000, // 120 second timeout (for large files)
+        maxBuffer: 50 * 1024 * 1024, // 50MB buffer for large files
         stdio: ['pipe', 'pipe', 'pipe']
       })
 
@@ -103,8 +104,9 @@ export class SSHConnection {
       const result = await this.exec('echo "alive"')
       this.connected = result.includes('alive')
       return this.connected
-    } catch {
+    } catch (err) {
       this.connected = false
+      console.error('[SSHConnection] Ping failed:', err)
       return false
     }
   }
@@ -137,7 +139,9 @@ export class SSHConnection {
     const port = this.config.port ? `-p ${this.config.port}` : ''
     const controlMaster = `-o ControlMaster=auto -o ControlPath="${this.controlPath}" -o ControlPersist=300`
 
-    // Quote the remote command properly
+    // Use single quotes to prevent local shell expansion
+    // Single quotes pass everything literally to the remote shell
+    // The remote shell will then expand ~ and other variables
     const quotedCmd = `'${command.replace(/'/g, "'\\''")}'`
 
     return `ssh ${port} ${controlMaster} ${user}@${host} ${quotedCmd}`
