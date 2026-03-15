@@ -670,20 +670,26 @@ async function getSessionMemoryRemote(workdir: string, remoteHost: string): Prom
     const encodedPath = encodeProjectPath(workdir)
     const memPath = `~/.claude/projects/${encodedPath}/memory/MEMORY.md`
 
+    debugLog(`[getSessionMemoryRemote] Looking for memory at ${memPath} on ${remoteHost}`)
+
     try {
       const content = await ssh.exec(`cat "${memPath}"`)
+      debugLog(`[getSessionMemoryRemote] Found memory file, ${content.length} bytes`)
       return content
-    } catch {
+    } catch (err) {
+      debugLog(`[getSessionMemoryRemote] Failed to read memory: ${err}`)
       // Try CLAUDE.md in workdir
       try {
         const content = await ssh.exec(`cat "${workdir}/CLAUDE.md"`)
+        debugLog(`[getSessionMemoryRemote] Found CLAUDE.md, ${content.length} bytes`)
         return content
       } catch {
+        debugLog(`[getSessionMemoryRemote] No memory files found`)
         return null
       }
     }
   } catch (err) {
-    console.error('[getSessionMemoryRemote]', err)
+    debugLog(`[getSessionMemoryRemote] Error: ${err}`)
     return null
   }
 }
@@ -851,6 +857,7 @@ export function registerIpcHandlers(agentManager: AgentManager): void {
   })
 
   ipcMain.handle('session:getMemory', async (_e, { workdir, isRemote, remoteHost }) => {
+    debugLog(`[IPC] session:getMemory called: workdir=${workdir}, isRemote=${isRemote}, remoteHost=${remoteHost}`)
     if (isRemote && remoteHost) {
       return getSessionMemoryRemote(workdir, remoteHost)
     }
@@ -957,6 +964,8 @@ export function registerIpcHandlers(agentManager: AgentManager): void {
         const [user, host] = remoteHost.split('@')
         const ssh = await sshPool.getConnection({ user, host })
 
+        debugLog(`[file:listDir] Listing remote files: ${dirPath} on ${remoteHost}`)
+
         // Use find to list files: find /dir -type f | head -1000
         const ignorePatterns = Array.from(IGNORE_DIRS)
           .map((d) => `'! -path "*/${d}/*"'`)
@@ -966,8 +975,10 @@ export function registerIpcHandlers(agentManager: AgentManager): void {
         let output = ''
         try {
           output = await ssh.exec(findCmd)
-        } catch {
+          debugLog(`[file:listDir] Found ${output.split('\n').filter(l => l.trim()).length} files`)
+        } catch (err) {
           // Directory might not exist or be inaccessible
+          debugLog(`[file:listDir] Failed to list directory: ${err}`)
           return { files: [] }
         }
 
