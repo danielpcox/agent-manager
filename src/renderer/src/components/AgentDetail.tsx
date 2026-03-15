@@ -410,20 +410,20 @@ export function AgentDetail() {
       </div>
 
       {/* Session stats */}
-      {activeTab === 'session' && agent.sessionId && (
+      {activeTab === 'session' && (agent.sessionId || agent.isRemote) && (
         <SessionStatsPanel sessionId={agent.sessionId} workdir={agent.workdir} onSelectFile={setSelectedFile} isRemote={agent.isRemote} remoteHost={agent.remoteHost} />
       )}
-      {activeTab === 'session' && !agent.sessionId && (
+      {activeTab === 'session' && !agent.sessionId && !agent.isRemote && (
         <div className="flex-1 flex items-center justify-center p-4 text-sm text-text-muted">
           No session ID yet — agent may still be starting.
         </div>
       )}
 
       {/* Transcript */}
-      {activeTab === 'transcript' && agent.sessionId && (
+      {activeTab === 'transcript' && (agent.sessionId || agent.isRemote) && (
         <TranscriptPanel sessionId={agent.sessionId} workdir={agent.workdir} onSelectFile={setSelectedFile} isRemote={agent.isRemote} remoteHost={agent.remoteHost} />
       )}
-      {activeTab === 'transcript' && !agent.sessionId && (
+      {activeTab === 'transcript' && !agent.sessionId && !agent.isRemote && (
         <div className="flex-1 flex items-center justify-center p-4 text-sm text-text-muted">
           No session ID yet — agent may still be starting.
         </div>
