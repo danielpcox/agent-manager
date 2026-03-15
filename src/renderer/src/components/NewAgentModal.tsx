@@ -159,7 +159,7 @@ export function NewAgentModal({ onClose }: NewAgentModalProps) {
 
   const handleCreate = useCallback(async () => {
     if (mode === 'local') {
-      if (!task.trim() || !workdir) return
+      if (!workdir) return
 
       await window.api.createAgent({
         task: task.trim(),
@@ -261,7 +261,7 @@ export function NewAgentModal({ onClose }: NewAgentModalProps) {
   const canCreate =
     mode === 'local'
       ? tab === 'new'
-        ? !!(task.trim() && workdir)
+        ? !!workdir
         : importMode === 'continue'
           ? !!workdir
           : !!(sessionId.trim() && workdir)
