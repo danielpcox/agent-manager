@@ -968,10 +968,10 @@ export function registerIpcHandlers(agentManager: AgentManager): void {
 
         // Use find to list files: find /dir -type f | head -1000
         const ignorePatterns = Array.from(IGNORE_DIRS)
-          .map((d) => `'! -path "*/${d}/*"'`)
+          .map((d) => `! -path "*/${d}/*"`)
           .join(' ')
 
-        const findCmd = `find "${dirPath}" -type f ${ignorePatterns} 2>/dev/null | head -1000`
+        const findCmd = `find ${dirPath} -type f ${ignorePatterns} 2>/dev/null | head -1000`
         let output = ''
         try {
           output = await ssh.exec(findCmd)
