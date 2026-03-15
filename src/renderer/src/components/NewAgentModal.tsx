@@ -161,10 +161,14 @@ export function NewAgentModal({ onClose }: NewAgentModalProps) {
     if (mode === 'local') {
       if (!workdir) return
 
+      // Use folder name as default if name is empty
+      const folderName = workdir.split('/').pop() || 'agent'
+      const agentName = name.trim() || folderName
+
       await window.api.createAgent({
         task: task.trim(),
         workdir,
-        name: name.trim() || undefined,
+        name: agentName,
         model,
         permissionMode
       })
