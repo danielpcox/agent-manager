@@ -23,6 +23,7 @@ const api = {
     ipcRenderer.invoke('agent:enableRemoteControl', { agentId }),
   killAgent: (agentId: string) => ipcRenderer.invoke('agent:kill', { agentId }),
   removeAgent: (agentId: string) => ipcRenderer.invoke('agent:remove', { agentId }),
+  retryRemoteConnection: (agentId: string) => ipcRenderer.invoke('agent:retryRemoteConnection', { agentId }),
   markRead: (agentId: string) => ipcRenderer.invoke('agent:markRead', { agentId }),
   renameAgent: (agentId: string, name: string) =>
     ipcRenderer.invoke('agent:rename', { agentId, name }),

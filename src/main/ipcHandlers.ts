@@ -714,6 +714,10 @@ export function registerIpcHandlers(agentManager: AgentManager): void {
     agentManager.removeAgent(agentId)
   })
 
+  ipcMain.handle('agent:retryRemoteConnection', async (_event, { agentId }) => {
+    agentManager.retryRemoteConnection(agentId)
+  })
+
   ipcMain.handle('agent:markRead', async (_event, { agentId }) => {
     agentManager.markRead(agentId)
   })

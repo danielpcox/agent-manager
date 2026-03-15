@@ -194,7 +194,17 @@ export function AgentDetail() {
           flushPending()
         })
       } else {
-        if (['killed', 'done', 'error'].includes(agent.status)) {
+        if (agent.isRemote && agent.status === 'disconnected') {
+          terminal.write(
+            '\x1b[33m SSH Connection Lost\x1b[0m\r\n' +
+            '\x1b[90m Remote session output not available.\r\n' +
+            ' Click the "Retry" button to reconnect.\x1b[0m\r\n'
+          )
+        } else if (agent.status === 'starting' && agent.isRemote) {
+          terminal.write(
+            '\x1b[36m Connecting to remote session...\x1b[0m\r\n'
+          )
+        } else if (['killed', 'done', 'error'].includes(agent.status)) {
           terminal.write(
             '\x1b[90m Session output not available (restored from previous app session).\r\n' +
             ' Use Import Session to reconnect.\x1b[0m\r\n'
@@ -336,10 +346,7 @@ export function AgentDetail() {
           )}
           {agent.status === 'disconnected' && (
             <button
-              onClick={() => {
-                // Trigger reconnection by spawning remote PTY again
-                window.api.resizePty(agent.id, 120, 40)
-              }}
+              onClick={() => window.api.retryRemoteConnection(agent.id)}
               className="px-2 py-1 text-xs text-text-secondary hover:text-accent border border-border hover:border-accent/50 rounded-md transition-colors"
               title="Attempt to reconnect to remote session"
             >
