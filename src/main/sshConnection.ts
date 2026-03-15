@@ -103,8 +103,9 @@ export class SSHConnection {
       const result = await this.exec('echo "alive"')
       this.connected = result.includes('alive')
       return this.connected
-    } catch {
+    } catch (err) {
       this.connected = false
+      console.error('[SSHConnection] Ping failed:', err)
       return false
     }
   }

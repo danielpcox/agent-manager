@@ -156,21 +156,30 @@ async function discoverRemoteSessions(
   keyPath?: string
 ): Promise<{ sessions: RemoteSessionInfo[]; canConnect: boolean }> {
   try {
+    console.log(`[Discovery] Starting session discovery for ${user}@${host}`)
+
     // Get or create SSH connection
     const ssh = await sshPool.getConnection({ user, host, keyPath })
+    console.log(`[Discovery] SSH connection obtained`)
 
     // Test connection
     const testResult = await ssh.ping()
     if (!testResult) {
-      throw new Error('SSH connection test failed')
+      throw new Error(
+        `Cannot connect to ${user}@${host}. Check SSH configuration, network connectivity, and that the host is reachable.`
+      )
     }
+    console.log(`[Discovery] SSH connection test passed`)
 
     // List tmux sessions on remote: tmux list-sessions -F "#{session_name}|#{pane_current_path}"
     let sessionsOutput = ''
     try {
+      console.log(`[Discovery] Listing tmux sessions...`)
       sessionsOutput = await ssh.exec(`tmux list-sessions -F "#{session_name}|#{pane_current_path}" 2>/dev/null || echo ""`)
-    } catch {
+      console.log(`[Discovery] Tmux output: ${sessionsOutput}`)
+    } catch (err) {
       // tmux might not be running any sessions
+      console.log(`[Discovery] Tmux command failed (might not have sessions):`, err)
       sessionsOutput = ''
     }
 
@@ -182,31 +191,46 @@ async function discoverRemoteSessions(
       const [sessionName, workdir] = line.split('|')
       if (!sessionName) continue
 
-      // Check if this tmux session is running Claude by examining the pane's command
-      try {
-        const pidOutput = await ssh.exec(
-          `tmux list-panes -t "${sessionName}" -F "#{pane_pid}" 2>/dev/null | head -1 || echo ""`
-        )
-        const pid = pidOutput.trim()
-        if (!pid) continue
+      console.log(`[Discovery] Checking session "${sessionName}" at ${workdir}...`)
 
-        const procCmd = await ssh.exec(`ps -p ${pid} -o command= 2>/dev/null || echo ""`)
-        if (procCmd.includes('claude')) {
+      // Get the current command in the main pane of this session
+      try {
+        const paneInfoOutput = await ssh.exec(
+          `tmux list-panes -t "${sessionName}" -F "#{pane_current_command}" 2>/dev/null | head -1 || echo ""`
+        )
+        const paneCommand = paneInfoOutput.trim()
+        console.log(`[Discovery] Session "${sessionName}" pane command: ${paneCommand}`)
+
+        // Include the session if it has Claude or other useful commands
+        if (paneCommand === 'claude' || paneCommand === 'bash' || paneCommand === '') {
+          console.log(`[Discovery] ✓ Including session: "${sessionName}" (${paneCommand || 'shell'})`)
+          claudeSessions.push({
+            sessionName,
+            workdir: workdir || '(unknown)'
+          })
+        } else {
+          console.log(`[Discovery] ℹ Including session: "${sessionName}" (${paneCommand})`)
           claudeSessions.push({
             sessionName,
             workdir: workdir || '(unknown)'
           })
         }
-      } catch {
-        // Skip sessions we can't inspect
+      } catch (err) {
+        // Include sessions even if we can't inspect them
+        console.log(`[Discovery] Error checking session "${sessionName}" but including it anyway:`, err)
+        claudeSessions.push({
+          sessionName,
+          workdir: workdir || '(unknown)'
+        })
       }
     }
 
+    console.log(`[Discovery] Found ${claudeSessions.length} tmux sessions`)
     return { sessions: claudeSessions, canConnect: true }
   } catch (err) {
-    throw new Error(
-      `Failed to discover remote sessions: ${err instanceof Error ? err.message : String(err)}`
-    )
+    const message = err instanceof Error ? err.message : String(err)
+    console.error(`[Discovery] Failed to discover remote sessions: ${message}`)
+    throw new Error(`Failed to discover remote sessions: ${message}`)
   }
 }
 
