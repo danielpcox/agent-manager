@@ -470,15 +470,19 @@ async function parseSessionTranscriptRemote(sessionId: string, workdir: string, 
   try {
     const ssh = await sshPool.getConnection({ user, host })
 
-    // Find the most recent .jsonl file
-    const base = path.join(os.homedir(), '.claude', 'projects', encodeProjectPath(workdir))
-    const findCmd = `ls -t "${base}"/*.jsonl 2>/dev/null | head -1`
+    // Find the most recent .jsonl file (use ~ to expand to remote home dir)
+    const encodedPath = encodeProjectPath(workdir)
+    const findCmd = `ls -t ~/.claude/projects/${encodedPath}/*.jsonl 2>/dev/null | head -1`
     let filePath: string
 
     try {
       filePath = (await ssh.exec(findCmd)).trim()
-      if (!filePath) return []
-    } catch {
+      if (!filePath) {
+        console.log(`[parseSessionTranscriptRemote] No session files found in ~/.claude/projects/${encodedPath}`)
+        return []
+      }
+    } catch (err) {
+      console.error(`[parseSessionTranscriptRemote] Failed to find session files:`, err)
       return []
     }
 
@@ -547,15 +551,19 @@ async function parseSessionStatsRemote(sessionId: string, workdir: string, remot
   try {
     const ssh = await sshPool.getConnection({ user, host })
 
-    // Find the most recent .jsonl file
-    const base = path.join(os.homedir(), '.claude', 'projects', encodeProjectPath(workdir))
-    const findCmd = `ls -t "${base}"/*.jsonl 2>/dev/null | head -1`
+    // Find the most recent .jsonl file (use ~ to expand to remote home dir)
+    const encodedPath = encodeProjectPath(workdir)
+    const findCmd = `ls -t ~/.claude/projects/${encodedPath}/*.jsonl 2>/dev/null | head -1`
     let filePath: string
 
     try {
       filePath = (await ssh.exec(findCmd)).trim()
-      if (!filePath) return null
-    } catch {
+      if (!filePath) {
+        console.log(`[parseSessionStatsRemote] No session files found in ~/.claude/projects/${encodedPath}`)
+        return null
+      }
+    } catch (err) {
+      console.error(`[parseSessionStatsRemote] Failed to find session files:`, err)
       return null
     }
 
@@ -637,8 +645,8 @@ async function getSessionMemoryRemote(workdir: string, remoteHost: string): Prom
   const [user, host] = remoteHost.split('@')
   try {
     const ssh = await sshPool.getConnection({ user, host })
-    const base = path.join(os.homedir(), '.claude', 'projects')
-    const memPath = path.join(base, encodeProjectPath(workdir), 'memory', 'MEMORY.md')
+    const encodedPath = encodeProjectPath(workdir)
+    const memPath = `~/.claude/projects/${encodedPath}/memory/MEMORY.md`
 
     try {
       const content = await ssh.exec(`cat "${memPath}"`)
@@ -646,8 +654,7 @@ async function getSessionMemoryRemote(workdir: string, remoteHost: string): Prom
     } catch {
       // Try CLAUDE.md in workdir
       try {
-        const claudePath = path.join(workdir, 'CLAUDE.md')
-        const content = await ssh.exec(`cat "${claudePath}"`)
+        const content = await ssh.exec(`cat "${workdir}/CLAUDE.md"`)
         return content
       } catch {
         return null
