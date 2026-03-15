@@ -671,7 +671,13 @@ export function NewAgentModal({ onClose }: NewAgentModalProps) {
                 <input
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder={tab === 'new' ? 'Auto-generated from task' : 'Auto-generated from session'}
+                  placeholder={
+                    tab === 'new' && workdir
+                      ? `Folder: ${workdir.split('/').pop()}`
+                      : tab === 'new'
+                        ? 'Auto-generated from task'
+                        : 'Auto-generated from session'
+                  }
                   className="w-full bg-surface-2 border border-border rounded-lg px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-border-focus transition-colors"
                 />
               </div>

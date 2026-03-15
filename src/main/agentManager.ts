@@ -221,7 +221,6 @@ export class AgentManager {
     this.onChanged?.()
 
     console.log(`[AgentManager] Creating agent "${name}" in ${params.workdir}`)
-    this.initializeWorkdir(managed)
     this.spawnPty(managed)
     this.watchForSessionId(managed)
     return agent
@@ -463,6 +462,19 @@ export class AgentManager {
 
   private spawnPty(managed: ManagedAgent): void {
     const { agent } = managed
+
+    // Ensure workdir exists before spawning
+    try {
+      if (!fs.existsSync(agent.workdir)) {
+        fs.mkdirSync(agent.workdir, { recursive: true })
+        console.log(`[AgentManager] Created workdir: ${agent.workdir}`)
+      }
+    } catch (err) {
+      console.warn(`[AgentManager] Failed to create workdir: ${err}`)
+      this.updateStatus(managed, 'error')
+      return
+    }
+
     const claudeArgs = this.buildClaudeArgs(agent)
     const claudeCmd = `${claudeBin} ${claudeArgs.join(' ')}`
 
