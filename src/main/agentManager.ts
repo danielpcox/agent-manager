@@ -510,6 +510,9 @@ export class AgentManager {
       console.log(`[AgentManager] PTY spawned via tmux (${sess}): ${claudeCmd} (cwd: ${agent.workdir})`)
 
       let buffer = ''
+      let taskToInject = agent.task || null
+      let trustDialogDetected = false
+      let userResponded = false
 
       ptyProcess.onData((data: string) => {
         buffer += data
@@ -522,6 +525,38 @@ export class AgentManager {
         this.detectModelChange(agent, data)
         this.detectStatus(managed, data)
         agent.updatedAt = Date.now()
+
+        // Handle task injection with trust dialog awareness
+        if (taskToInject && !userResponded) {
+          // Detect the trust dialog question
+          if (data.includes('Is this a project you created or one you trust?')) {
+            trustDialogDetected = true
+            console.log(`[AgentManager] Detected trust dialog for "${agent.name}"`)
+          }
+
+          // If we detected the trust dialog, wait for user to respond
+          // User response will be echoed back to the terminal (their input + newline)
+          if (trustDialogDetected && data.includes('\n')) {
+            console.log(`[AgentManager] Detected user response to trust dialog for "${agent.name}"`)
+            userResponded = true
+            // Wait a moment for Claude to process the response and show its prompt
+            setTimeout(() => {
+              if (managed.pty && taskToInject) {
+                try {
+                  ptyProcess.write(taskToInject + '\r')
+                  this.addEvent(agent, {
+                    type: 'user_message',
+                    content: taskToInject
+                  })
+                  console.log(`[AgentManager] Injected task after trust dialog: "${agent.name}"`)
+                  taskToInject = null
+                } catch (err) {
+                  console.warn(`[AgentManager] Failed to inject task: ${err}`)
+                }
+              }
+            }, 500)
+          }
+        }
       })
 
       ptyProcess.onExit(({ exitCode }) => {
@@ -531,20 +566,23 @@ export class AgentManager {
       this.updateStatus(managed, 'running')
 
       // Send the initial task after a delay for Claude to initialize
+      // (if no trust dialog appears, this will inject the task after 4 seconds)
       if (agent.task) {
         setTimeout(() => {
-          if (managed.pty) {
+          if (managed.pty && taskToInject) {
             try {
-              ptyProcess.write(agent.task + '\r')
+              ptyProcess.write(taskToInject + '\r')
               this.addEvent(agent, {
                 type: 'user_message',
-                content: agent.task
+                content: taskToInject
               })
+              console.log(`[AgentManager] Injected task after timeout: "${agent.name}"`)
+              taskToInject = null
             } catch (err) {
               console.warn(`[AgentManager] Failed to inject task: ${err}`)
             }
           }
-        }, 3000)
+        }, 4000)
       }
     } catch (err) {
       console.error(`[AgentManager] Failed to spawn PTY:`, err)
