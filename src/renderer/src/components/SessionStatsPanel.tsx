@@ -4,6 +4,7 @@ import type { SessionStats } from '../types/stats'
 interface Props {
   sessionId: string
   workdir: string
+  onSelectFile?: (filePath: string) => void
 }
 
 function formatDate(iso: string): string {
@@ -19,7 +20,7 @@ function relPath(filePath: string, workdir: string): string {
   return filePath
 }
 
-export function SessionStatsPanel({ sessionId, workdir }: Props) {
+export function SessionStatsPanel({ sessionId, workdir, onSelectFile }: Props) {
   const [stats, setStats] = useState<SessionStats | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -147,9 +148,19 @@ export function SessionStatsPanel({ sessionId, workdir }: Props) {
           </h3>
           <div className="space-y-0.5">
             {stats.filesTouched.map((f) => (
-              <div key={f} className="font-mono text-[11px] text-text-secondary truncate" title={f}>
+              <button
+                key={f}
+                onClick={() => onSelectFile?.(f)}
+                disabled={!onSelectFile}
+                className={`w-full text-left font-mono text-[11px] truncate px-1.5 py-0.5 rounded transition-colors ${
+                  onSelectFile
+                    ? 'text-accent hover:bg-surface-2 active:bg-surface-3 cursor-pointer'
+                    : 'text-text-secondary'
+                }`}
+                title={f}
+              >
                 {relPath(f, workdir)}
-              </div>
+              </button>
             ))}
           </div>
         </section>

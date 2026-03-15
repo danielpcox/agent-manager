@@ -4,6 +4,8 @@ import { StatusBadge } from './StatusBadge'
 import { SessionStatsPanel } from './SessionStatsPanel'
 import { TranscriptPanel } from './TranscriptPanel'
 import { MemoryPanel } from './MemoryPanel'
+import { FileViewerModal } from './FileViewerModal'
+import { BrowseFilesPanel } from './BrowseFilesPanel'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
@@ -24,7 +26,8 @@ export function AgentDetail() {
   const terminalRef = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
   const [now, setNow] = useState(Date.now())
-  const [activeTab, setActiveTab] = useState<'terminal' | 'session' | 'transcript' | 'memory'>('terminal')
+  const [activeTab, setActiveTab] = useState<'terminal' | 'session' | 'transcript' | 'memory' | 'browse'>('terminal')
+  const [selectedFile, setSelectedFile] = useState<string | null>(null)
 
   // Reset tab when agent changes
   useEffect(() => { setActiveTab('terminal') }, [agent?.id])
@@ -356,7 +359,7 @@ export function AgentDetail() {
 
       {/* Tab bar */}
       <div className="flex border-b border-border shrink-0 px-2 gap-1 pt-1">
-        {(['terminal', 'session', 'transcript', 'memory'] as const).map((tab) => (
+        {(['terminal', 'session', 'transcript', 'memory', 'browse'] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -378,7 +381,7 @@ export function AgentDetail() {
 
       {/* Session stats */}
       {activeTab === 'session' && agent.sessionId && (
-        <SessionStatsPanel sessionId={agent.sessionId} workdir={agent.workdir} />
+        <SessionStatsPanel sessionId={agent.sessionId} workdir={agent.workdir} onSelectFile={setSelectedFile} />
       )}
       {activeTab === 'session' && !agent.sessionId && (
         <div className="flex-1 flex items-center justify-center p-4 text-sm text-text-muted">
@@ -388,7 +391,7 @@ export function AgentDetail() {
 
       {/* Transcript */}
       {activeTab === 'transcript' && agent.sessionId && (
-        <TranscriptPanel sessionId={agent.sessionId} workdir={agent.workdir} />
+        <TranscriptPanel sessionId={agent.sessionId} workdir={agent.workdir} onSelectFile={setSelectedFile} />
       )}
       {activeTab === 'transcript' && !agent.sessionId && (
         <div className="flex-1 flex items-center justify-center p-4 text-sm text-text-muted">
@@ -398,6 +401,14 @@ export function AgentDetail() {
 
       {/* Memory */}
       {activeTab === 'memory' && <MemoryPanel workdir={agent.workdir} />}
+
+      {/* Browse files */}
+      {activeTab === 'browse' && <BrowseFilesPanel workdir={agent.workdir} onSelectFile={setSelectedFile} />}
+
+      {/* File viewer modal */}
+      {selectedFile && (
+        <FileViewerModal filePath={selectedFile} workdir={agent.workdir} onClose={() => setSelectedFile(null)} />
+      )}
 
       {/* Footer stats */}
       <div className="px-4 py-1.5 border-t border-border flex items-center gap-4 text-[10px] text-text-muted shrink-0">

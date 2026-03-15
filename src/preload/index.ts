@@ -95,7 +95,13 @@ const api = {
     ipcRenderer.invoke('session:getStats', { sessionId, workdir }),
   getSessionMemory: (workdir: string) =>
     ipcRenderer.invoke('session:getMemory', { workdir }),
-  getGlobalStats: () => ipcRenderer.invoke('stats:getGlobal')
+  getGlobalStats: () => ipcRenderer.invoke('stats:getGlobal'),
+
+  // File reading and browsing
+  readFile: (filePath: string, workdir: string) =>
+    ipcRenderer.invoke('file:read', { filePath, workdir }),
+  listDir: (dirPath: string, workdir: string) =>
+    ipcRenderer.invoke('file:listDir', { dirPath, workdir })
 }
 
 contextBridge.exposeInMainWorld('api', api)

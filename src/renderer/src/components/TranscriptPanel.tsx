@@ -4,6 +4,54 @@ import type { TranscriptEntry } from '../types/stats'
 interface Props {
   sessionId: string
   workdir: string
+  onSelectFile?: (filePath: string) => void
+}
+
+// Detect absolute file paths in text (e.g. /path/to/file.txt, /Users/name/project/src/app.ts)
+function linkifyPaths(text: string, onSelectFile?: (path: string) => void): (string | JSX.Element)[] {
+  // Match absolute paths: /... with at least one dot (file extension)
+  // Allow alphanumeric, dots, hyphens, underscores
+  const pathRegex = /(\/[a-zA-Z0-9._/-]+\.[a-zA-Z0-9]+)/g
+
+  const parts: (string | JSX.Element)[] = []
+  let lastIndex = 0
+  let matchIndex = 0
+
+  for (const match of text.matchAll(pathRegex)) {
+    const path = match[0]
+    const start = match.index!
+
+    // Add text before the match
+    if (start > lastIndex) {
+      parts.push(text.slice(lastIndex, start))
+    }
+
+    // Add the clickable path
+    parts.push(
+      <button
+        key={`path-${matchIndex++}`}
+        onClick={() => onSelectFile?.(path)}
+        disabled={!onSelectFile}
+        className={`inline ${
+          onSelectFile
+            ? 'text-accent hover:underline cursor-pointer'
+            : 'text-text-secondary'
+        }`}
+        title={path}
+      >
+        {path}
+      </button>
+    )
+
+    lastIndex = start + path.length
+  }
+
+  // Add remaining text
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex))
+  }
+
+  return parts.length > 0 ? parts : [text]
 }
 
 function ThinkingBlock({ content }: { content: string }) {
@@ -47,7 +95,7 @@ function ToolUseBlock({ toolName, content }: { toolName: string; content: string
   )
 }
 
-function EntryView({ entry }: { entry: TranscriptEntry }) {
+function EntryView({ entry, onSelectFile }: { entry: TranscriptEntry; onSelectFile?: (path: string) => void }) {
   if (entry.role === 'user') {
     const text = entry.blocks.filter(b => b.type === 'text').map(b => b.content).join('\n')
     if (!text.trim()) return null
@@ -55,7 +103,7 @@ function EntryView({ entry }: { entry: TranscriptEntry }) {
       <div className="mb-4">
         <div className="text-[10px] text-text-muted uppercase tracking-wider font-semibold mb-1">You</div>
         <div className="text-sm text-text-primary bg-surface-2 rounded px-3 py-2 whitespace-pre-wrap leading-relaxed">
-          {text}
+          {linkifyPaths(text, onSelectFile)}
         </div>
       </div>
     )
@@ -74,7 +122,7 @@ function EntryView({ entry }: { entry: TranscriptEntry }) {
         if (block.type === 'text' && block.content.trim()) {
           return (
             <div key={i} className="text-sm text-text-primary whitespace-pre-wrap leading-relaxed mt-1">
-              {block.content}
+              {linkifyPaths(block.content, onSelectFile)}
             </div>
           )
         }
@@ -84,7 +132,7 @@ function EntryView({ entry }: { entry: TranscriptEntry }) {
   )
 }
 
-export function TranscriptPanel({ sessionId, workdir }: Props) {
+export function TranscriptPanel({ sessionId, workdir, onSelectFile }: Props) {
   const [entries, setEntries] = useState<TranscriptEntry[]>([])
   const [loading, setLoading] = useState(true)
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -122,7 +170,7 @@ export function TranscriptPanel({ sessionId, workdir }: Props) {
 
   return (
     <div className="flex-1 overflow-y-auto px-4 py-3">
-      {entries.map((entry, i) => <EntryView key={i} entry={entry} />)}
+      {entries.map((entry, i) => <EntryView key={i} entry={entry} onSelectFile={onSelectFile} />)}
       <div ref={bottomRef} />
     </div>
   )

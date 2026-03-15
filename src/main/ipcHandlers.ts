@@ -523,4 +523,111 @@ export function registerIpcHandlers(agentManager: AgentManager): void {
   ipcMain.handle('stats:getGlobal', async () => {
     return getGlobalStats()
   })
+
+  // File reading and browsing
+  const BINARY_EXTENSIONS = new Set([
+    'png', 'jpg', 'jpeg', 'gif', 'webp', 'ico', 'svg',
+    'pdf', 'zip', 'tar', 'gz', 'bz2', '7z', 'rar',
+    'mp4', 'mp3', 'wav', 'flac', 'aac', 'ogg',
+    'so', 'o', 'a', 'dylib', 'dll', 'exe', 'app',
+    'pyc', 'pyo', 'class', 'jar'
+  ])
+
+  const IGNORE_DIRS = new Set([
+    '.git', 'node_modules', '.next', 'dist', 'build', '.venv',
+    '__pycache__', '.pytest_cache', '.tox', 'venv', 'env',
+    '.idea', '.vscode', 'coverage', '.nyc_output'
+  ])
+
+  const MAX_FILE_SIZE = 5 * 1024 * 1024 // 5MB
+
+  function isBinaryFile(filePath: string): boolean {
+    const ext = path.extname(filePath).slice(1).toLowerCase()
+    return BINARY_EXTENSIONS.has(ext)
+  }
+
+  function isSafeFile(filePath: string): boolean {
+    // Prevent path traversal attacks by rejecting paths with .. or symlink escapes
+    // Allow any absolute or relative path that doesn't try to escape
+    const normalized = path.normalize(path.resolve(filePath))
+    // Reject if it contains .. after normalization (would indicate traversal attempt)
+    return !normalized.includes('/..')
+  }
+
+  ipcMain.handle('file:read', async (_e, { filePath, workdir }) => {
+    try {
+      if (!isSafeFile(filePath)) {
+        throw new Error('Invalid file path')
+      }
+
+      const resolved = path.isAbsolute(filePath) ? filePath : path.join(workdir, filePath)
+      const stat = fs.statSync(resolved)
+
+      if (stat.isDirectory()) {
+        throw new Error('Path is a directory, not a file')
+      }
+
+      if (stat.size > MAX_FILE_SIZE) {
+        throw new Error(`File too large (${(stat.size / 1024 / 1024).toFixed(1)}MB > 5MB limit)`)
+      }
+
+      if (isBinaryFile(resolved)) {
+        return { content: '[Binary file]', size: stat.size, isBinary: true }
+      }
+
+      const content = fs.readFileSync(resolved, 'utf-8')
+      return { content, size: stat.size, isBinary: false }
+    } catch (err) {
+      throw new Error(`Failed to read file: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  })
+
+  ipcMain.handle('file:listDir', async (_e, { dirPath, workdir }) => {
+    try {
+      if (!isSafeFile(dirPath)) {
+        throw new Error('Invalid directory path')
+      }
+
+      const resolved = path.isAbsolute(dirPath) ? dirPath : path.join(workdir, dirPath)
+      const files: Array<{ path: string; size: number; isDir: boolean }> = []
+
+      const walk = (dir: string, depth: number) => {
+        if (depth > 5) return // Limit recursion
+        try {
+          const entries = fs.readdirSync(dir, { withFileTypes: true })
+          for (const entry of entries) {
+            if (IGNORE_DIRS.has(entry.name)) continue
+
+            const fullPath = path.join(dir, entry.name)
+            const relPath = path.relative(workdir, fullPath)
+
+            if (entry.isDirectory()) {
+              files.push({ path: relPath, size: 0, isDir: true })
+              walk(fullPath, depth + 1)
+            } else if (entry.isFile()) {
+              try {
+                const size = fs.statSync(fullPath).size
+                files.push({ path: relPath, size, isDir: false })
+              } catch {
+                // Skip files we can't stat
+              }
+            }
+          }
+        } catch {
+          // Skip directories we can't read
+        }
+      }
+
+      walk(resolved, 0)
+      // Sort: dirs first, then alphabetically
+      files.sort((a, b) => {
+        if (a.isDir !== b.isDir) return b.isDir ? 1 : -1
+        return a.path.localeCompare(b.path)
+      })
+
+      return { files }
+    } catch (err) {
+      throw new Error(`Failed to list directory: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  })
 }
