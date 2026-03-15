@@ -507,13 +507,19 @@ async function parseSessionTranscriptRemote(sessionId: string, workdir: string, 
     // Parse like local version
     const entries: TranscriptEntry[] = []
     const lines = content.split('\n')
+    let lineCount = 0
 
     for (const line of lines) {
       if (!line.trim()) continue
+      lineCount++
       let entry: Record<string, unknown>
-      try { entry = JSON.parse(line) } catch { continue }
+      try { entry = JSON.parse(line) } catch (e) {
+        debugLog(`[parseSessionTranscriptRemote] Failed to parse line ${lineCount}: ${e}`)
+        continue
+      }
 
       const ts = (entry.timestamp as string) || null
+      const entryType = entry.type as string
 
       if (entry.type === 'user' && !entry.isMeta) {
         const content = (entry.message as Record<string, unknown>)?.content
@@ -554,6 +560,7 @@ async function parseSessionTranscriptRemote(sessionId: string, workdir: string, 
       }
     }
 
+    debugLog(`[parseSessionTranscriptRemote] Parsed ${lineCount} lines, found ${entries.length} transcript entries`)
     return entries
   } catch (err) {
     console.error('[parseSessionTranscriptRemote]', err)

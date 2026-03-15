@@ -522,8 +522,9 @@ export class AgentManager {
     }
 
     try {
-      // Spawn PTY that runs: ssh user@host tmux attach-session -t session-name
-      const ptyProcess = pty.spawn('ssh', ['-t', remoteHost, 'tmux', 'attach-session', '-t', remoteSessionName], {
+      // Spawn PTY that runs: ssh user@host tmux attach-session -d -t session-name
+      // The -d flag detaches other clients from the session (allows multiple connections)
+      const ptyProcess = pty.spawn('ssh', ['-t', remoteHost, 'tmux', 'attach-session', '-d', '-t', remoteSessionName], {
         name: 'xterm-256color',
         cols: 120,
         rows: 40,
