@@ -6,6 +6,9 @@ const api = {
   // Agent management
   createAgent: (params: unknown) => ipcRenderer.invoke('agent:create', params),
   importAgent: (params: unknown) => ipcRenderer.invoke('agent:import', params),
+  createRemoteAgent: (params: unknown) => ipcRenderer.invoke('agent:createRemote', params),
+  discoverRemoteSessions: (user: string, host: string, keyPath?: string) =>
+    ipcRenderer.invoke('agent:discoverRemote', { user, host, keyPath }),
   sendMessage: (agentId: string, message: string) =>
     ipcRenderer.invoke('agent:sendMessage', { agentId, message }),
   sendScreenshot: (agentId: string, imageBase64: string, message: string) =>
@@ -98,10 +101,10 @@ const api = {
   getGlobalStats: () => ipcRenderer.invoke('stats:getGlobal'),
 
   // File reading and browsing
-  readFile: (filePath: string, workdir: string) =>
-    ipcRenderer.invoke('file:read', { filePath, workdir }),
-  listDir: (dirPath: string, workdir: string) =>
-    ipcRenderer.invoke('file:listDir', { dirPath, workdir })
+  readFile: (filePath: string, workdir: string, isRemote?: boolean, remoteHost?: string) =>
+    ipcRenderer.invoke('file:read', { filePath, workdir, isRemote, remoteHost }),
+  listDir: (dirPath: string, workdir: string, isRemote?: boolean, remoteHost?: string) =>
+    ipcRenderer.invoke('file:listDir', { dirPath, workdir, isRemote, remoteHost })
 }
 
 contextBridge.exposeInMainWorld('api', api)

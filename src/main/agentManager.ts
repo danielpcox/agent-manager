@@ -11,8 +11,11 @@ import type {
   ConversationEvent,
   CreateAgentParams,
   ImportAgentParams,
-  PermissionMode
+  PermissionMode,
+  CreateRemoteAgentParams
 } from '../renderer/src/types/agent'
+import type { SSHConnection } from './sshConnection'
+import { sshPool } from './sshConnection'
 
 const SCREENSHOT_DIR = path.join(os.tmpdir(), 'agent-manager-screenshots')
 
@@ -39,6 +42,9 @@ interface ManagedAgent {
   suppressDetectionUntil: number  // epoch ms; skip detectStatus while < Date.now()
   firstActivityAt: number          // epoch ms of first ✻ in current period; 0 = not started
   terminalTabActive: boolean       // false when renderer is on a non-terminal tab
+  sshConnection?: SSHConnection    // For remote agents
+  reconnectAttempts?: number       // For remote agents: number of reconnection attempts
+  lastReconnectTime?: number       // For remote agents: timestamp of last reconnect attempt
 }
 
 export class AgentManager {
@@ -264,6 +270,98 @@ export class AgentManager {
     return agent
   }
 
+  async createRemoteAgent(params: CreateRemoteAgentParams): Promise<Agent> {
+    const id = uuidv4()
+    const now = Date.now()
+    const remoteHost = `${params.user}@${params.host}`
+
+    let remoteSessionName = params.sessionName
+    let workdir = params.workdir
+
+    // If creating new session, spawn Claude remotely
+    if (!remoteSessionName) {
+      remoteSessionName = `am_${id.replace(/-/g, '')}`
+
+      try {
+        const ssh = await sshPool.getConnection({ user: params.user, host: params.host })
+        const claudeArgs = this.buildClaudeArgs({
+          id,
+          name: params.name || this.generateName(params.task),
+          task: params.task,
+          workdir: params.workdir,
+          status: 'starting',
+          model: params.model || 'claude-sonnet-4-6',
+          permissionMode: params.permissionMode || 'autonomous',
+          sessionId: null,
+          remoteControlUrl: null,
+          createdAt: now,
+          updatedAt: now,
+          statusChangedAt: now,
+          runningTimeMs: 0,
+          totalCostUsd: 0,
+          tokenContext: 0,
+          isUnread: false,
+          isTabled: false,
+          events: []
+        } as Agent)
+
+        const claudeCmd = claudeArgs.join(' ')
+        const tmuxCmd = `mkdir -p "${workdir}" && cd "${workdir}" && tmux new-session -d -s ${remoteSessionName} 'claude ${claudeCmd}'`
+
+        await ssh.exec(tmuxCmd)
+        console.log(`[AgentManager] Created remote tmux session ${remoteSessionName} on ${remoteHost}:${workdir}`)
+      } catch (err) {
+        throw new Error(`Failed to create remote session: ${err}`)
+      }
+    }
+
+    const name = params.name || this.generateName(params.task)
+    const agent: Agent = {
+      id,
+      name,
+      task: params.task,
+      workdir,
+      status: 'starting',
+      model: params.model || 'claude-sonnet-4-6',
+      permissionMode: params.permissionMode || 'autonomous',
+      sessionId: null,
+      remoteControlUrl: null,
+      createdAt: now,
+      updatedAt: now,
+      statusChangedAt: now,
+      runningTimeMs: 0,
+      totalCostUsd: 0,
+      tokenContext: 0,
+      isUnread: false,
+      isTabled: false,
+      events: [],
+      isRemote: true,
+      remoteHost,
+      remoteSessionName
+    }
+
+    const managed: ManagedAgent = {
+      agent,
+      pty: null,
+      outputBuffer: '',
+      tmuxSession: '',
+      idleTimer: null,
+      suppressDetectionUntil: 0,
+      firstActivityAt: 0,
+      terminalTabActive: true,
+      reconnectAttempts: 0
+    }
+
+    this.agents.set(id, managed)
+    this.send('agent:created', agent)
+    this.onChanged?.()
+
+    console.log(`[AgentManager] Creating remote agent "${name}" on ${remoteHost}:${workdir}`)
+    this.spawnRemotePty(managed)
+
+    return agent
+  }
+
   private spawnPtyForImport(managed: ManagedAgent, params: ImportAgentParams): void {
     const { agent } = managed
     const shell = process.env.SHELL || '/bin/zsh'
@@ -411,6 +509,94 @@ export class AgentManager {
         isError: true
       })
     }
+  }
+
+  private spawnRemotePty(managed: ManagedAgent): void {
+    const agent = managed.agent
+    const { remoteHost, remoteSessionName } = agent
+
+    if (!remoteHost || !remoteSessionName) {
+      console.error(`[AgentManager] Remote agent missing remoteHost or remoteSessionName`)
+      this.updateStatus(managed, 'error')
+      return
+    }
+
+    try {
+      // Spawn PTY that runs: ssh user@host tmux attach-session -t session-name
+      const ptyProcess = pty.spawn('ssh', ['-t', remoteHost, 'tmux', 'attach-session', '-t', remoteSessionName], {
+        name: 'xterm-256color',
+        cols: 120,
+        rows: 40,
+        env: {
+          ...process.env,
+          TERM: 'xterm-256color',
+          COLORTERM: 'truecolor'
+        } as Record<string, string>
+      })
+
+      managed.pty = ptyProcess
+      console.log(`[AgentManager] Remote PTY spawned: ssh ${remoteHost} tmux attach-session -t ${remoteSessionName}`)
+
+      ptyProcess.onData((data: string) => {
+        managed.outputBuffer += data
+        if (managed.outputBuffer.length > MAX_BUFFER) {
+          managed.outputBuffer = managed.outputBuffer.slice(-MAX_BUFFER / 2)
+        }
+        this.send('agent:ptyData', { agentId: agent.id, data })
+        this.detectRemoteControlUrl(agent, data)
+        this.detectStatus(managed, data)
+        agent.updatedAt = Date.now()
+      })
+
+      ptyProcess.onExit(({ exitCode }) => {
+        this.handleRemoteExit(managed)
+      })
+
+      this.updateStatus(managed, 'running')
+    } catch (err) {
+      console.error(`[AgentManager] Failed to spawn remote PTY:`, err)
+      this.updateStatus(managed, 'error')
+      this.addEvent(agent, {
+        type: 'error',
+        content: `Failed to attach to remote session: ${err}`,
+        isError: true
+      })
+    }
+  }
+
+  private handleRemoteExit(managed: ManagedAgent): void {
+    const agent = managed.agent
+    const maxRetries = 5
+
+    if (!managed.reconnectAttempts) managed.reconnectAttempts = 0
+    managed.reconnectAttempts++
+
+    if (managed.reconnectAttempts > maxRetries) {
+      console.log(`[AgentManager] Remote session disconnected after ${maxRetries} reconnect attempts`)
+      this.updateStatus(managed, 'disconnected')
+      this.addEvent(agent, {
+        type: 'error',
+        content: `SSH connection lost after ${maxRetries} reconnect attempts. Click to retry.`,
+        isError: true
+      })
+      return
+    }
+
+    // Exponential backoff: 1s, 2s, 4s, 8s, 16s, max 30s
+    const backoff = Math.min(30000, Math.pow(2, managed.reconnectAttempts - 1) * 1000)
+
+    console.log(
+      `[AgentManager] Remote session disconnected, reconnecting in ${backoff}ms ` +
+        `(attempt ${managed.reconnectAttempts}/${maxRetries})`
+    )
+
+    this.updateStatus(managed, 'reconnecting')
+
+    setTimeout(() => {
+      if (!managed.pty || !managed.pty.isAlive) {
+        this.spawnRemotePty(managed)
+      }
+    }, backoff)
   }
 
   private watchForSessionId(managed: ManagedAgent): void {

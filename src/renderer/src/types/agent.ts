@@ -5,6 +5,8 @@ export type AgentStatus =
   | 'done'
   | 'error'
   | 'killed'
+  | 'reconnecting'
+  | 'disconnected'
 
 export type PermissionMode = 'autonomous' | 'readonly' | 'plan'
 
@@ -46,6 +48,9 @@ export interface Agent {
   isUnread: boolean
   isTabled: boolean
   events: ConversationEvent[]
+  isRemote?: boolean
+  remoteHost?: string
+  remoteSessionName?: string
 }
 
 export interface CreateAgentParams {
@@ -63,4 +68,26 @@ export interface ImportAgentParams {
   continueRecent?: boolean
   model?: string
   permissionMode?: PermissionMode
+}
+
+export interface CreateRemoteAgentParams {
+  user: string
+  host: string
+  workdir: string
+  sessionName?: string
+  task: string
+  name?: string
+  model?: string
+  permissionMode?: PermissionMode
+}
+
+export interface DiscoverRemoteSessionsParams {
+  user: string
+  host: string
+  keyPath?: string
+}
+
+export interface RemoteSessionInfo {
+  sessionName: string
+  workdir: string
 }

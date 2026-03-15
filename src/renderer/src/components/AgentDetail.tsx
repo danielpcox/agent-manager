@@ -317,18 +317,35 @@ export function AgentDetail() {
             )}
           </div>
           <div className="text-[11px] text-text-muted truncate">
-            {agent.workdir} &middot; {agent.model}
+            {agent.isRemote && agent.remoteHost
+              ? `${agent.remoteHost}:${agent.workdir}`
+              : agent.workdir}
+            &middot; {agent.model}
           </div>
         </div>
 
         <div className="flex items-center gap-1.5 shrink-0">
-          <button
-            onClick={handleTable}
-            className="px-2 py-1 text-xs text-text-secondary hover:text-text-primary border border-border hover:border-text-muted/50 rounded-md transition-colors"
-            title={agent.isTabled ? 'Move back to inbox' : 'Table this agent'}
-          >
-            {agent.isTabled ? 'Untable' : 'Table'}
-          </button>
+          {agent.status !== 'disconnected' && (
+            <button
+              onClick={handleTable}
+              className="px-2 py-1 text-xs text-text-secondary hover:text-text-primary border border-border hover:border-text-muted/50 rounded-md transition-colors"
+              title={agent.isTabled ? 'Move back to inbox' : 'Table this agent'}
+            >
+              {agent.isTabled ? 'Untable' : 'Table'}
+            </button>
+          )}
+          {agent.status === 'disconnected' && (
+            <button
+              onClick={() => {
+                // Trigger reconnection by spawning remote PTY again
+                window.api.resizePty(agent.id, 120, 40)
+              }}
+              className="px-2 py-1 text-xs text-text-secondary hover:text-accent border border-border hover:border-accent/50 rounded-md transition-colors"
+              title="Attempt to reconnect to remote session"
+            >
+              Retry
+            </button>
+          )}
           {!agent.remoteControlUrl && isActive && (
             <button
               onClick={handleRemoteControl}
@@ -346,7 +363,7 @@ export function AgentDetail() {
               Kill
             </button>
           )}
-          {!isActive && (
+          {!isActive && agent.status !== 'disconnected' && (
             <button
               onClick={handleRemove}
               className="px-2 py-1 text-xs text-text-secondary hover:text-status-error border border-border hover:border-status-error/50 rounded-md transition-colors"

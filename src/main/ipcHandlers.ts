@@ -4,8 +4,10 @@ import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
 import readline from 'readline'
+import { execSync } from 'child_process'
 import { AgentManager } from './agentManager'
 import { getWebInfo } from './webServer'
+import { sshPool } from './sshConnection'
 
 interface SessionInfo {
   sessionId: string
@@ -141,6 +143,71 @@ async function listClaudeSessions(): Promise<SessionInfo[]> {
 
   sessions.sort((a, b) => b.mtime - a.mtime)
   return sessions
+}
+
+interface RemoteSessionInfo {
+  sessionName: string
+  workdir: string
+}
+
+async function discoverRemoteSessions(
+  user: string,
+  host: string,
+  keyPath?: string
+): Promise<{ sessions: RemoteSessionInfo[]; canConnect: boolean }> {
+  try {
+    // Get or create SSH connection
+    const ssh = await sshPool.getConnection({ user, host, keyPath })
+
+    // Test connection
+    const testResult = await ssh.ping()
+    if (!testResult) {
+      throw new Error('SSH connection test failed')
+    }
+
+    // List tmux sessions on remote: tmux list-sessions -F "#{session_name}|#{pane_current_path}"
+    let sessionsOutput = ''
+    try {
+      sessionsOutput = await ssh.exec(`tmux list-sessions -F "#{session_name}|#{pane_current_path}" 2>/dev/null || echo ""`)
+    } catch {
+      // tmux might not be running any sessions
+      sessionsOutput = ''
+    }
+
+    const claudeSessions: RemoteSessionInfo[] = []
+
+    for (const line of sessionsOutput.split('\n')) {
+      if (!line.trim()) continue
+
+      const [sessionName, workdir] = line.split('|')
+      if (!sessionName) continue
+
+      // Check if this tmux session is running Claude by examining the pane's command
+      try {
+        const pidOutput = await ssh.exec(
+          `tmux list-panes -t "${sessionName}" -F "#{pane_pid}" 2>/dev/null | head -1 || echo ""`
+        )
+        const pid = pidOutput.trim()
+        if (!pid) continue
+
+        const procCmd = await ssh.exec(`ps -p ${pid} -o command= 2>/dev/null || echo ""`)
+        if (procCmd.includes('claude')) {
+          claudeSessions.push({
+            sessionName,
+            workdir: workdir || '(unknown)'
+          })
+        }
+      } catch {
+        // Skip sessions we can't inspect
+      }
+    }
+
+    return { sessions: claudeSessions, canConnect: true }
+  } catch (err) {
+    throw new Error(
+      `Failed to discover remote sessions: ${err instanceof Error ? err.message : String(err)}`
+    )
+  }
 }
 
 function encodeProjectPath(absPath: string): string {
@@ -384,6 +451,14 @@ export function registerIpcHandlers(agentManager: AgentManager): void {
     return agentManager.importAgent(params)
   })
 
+  ipcMain.handle('agent:createRemote', async (_event, params) => {
+    return agentManager.createRemoteAgent(params)
+  })
+
+  ipcMain.handle('agent:discoverRemote', async (_event, { user, host, keyPath }) => {
+    return discoverRemoteSessions(user, host, keyPath)
+  })
+
   ipcMain.handle('agent:sendMessage', async (_event, { agentId, message }) => {
     agentManager.sendMessage(agentId, message)
   })
@@ -554,78 +629,146 @@ export function registerIpcHandlers(agentManager: AgentManager): void {
     return !normalized.includes('/..')
   }
 
-  ipcMain.handle('file:read', async (_e, { filePath, workdir }) => {
+  ipcMain.handle('file:read', async (_e, { filePath, workdir, isRemote, remoteHost }) => {
     try {
       if (!isSafeFile(filePath)) {
         throw new Error('Invalid file path')
       }
 
-      const resolved = path.isAbsolute(filePath) ? filePath : path.join(workdir, filePath)
-      const stat = fs.statSync(resolved)
+      if (isRemote && remoteHost) {
+        // Read file from remote machine via SSH
+        const [user, host] = remoteHost.split('@')
+        const ssh = await sshPool.getConnection({ user, host })
 
-      if (stat.isDirectory()) {
-        throw new Error('Path is a directory, not a file')
+        // Use cat to read the file
+        let content = ''
+        try {
+          content = await ssh.exec(`cat "${filePath}" 2>/dev/null || echo ""`)
+        } catch (err) {
+          throw new Error(`Failed to read remote file: ${err}`)
+        }
+
+        // Check if binary (simple heuristic: null bytes)
+        const isBinary = content.includes('\0')
+        if (isBinary) {
+          return { content: '[Binary file]', size: content.length, isBinary: true }
+        }
+
+        if (content.length > MAX_FILE_SIZE) {
+          throw new Error(`File too large (${(content.length / 1024 / 1024).toFixed(1)}MB > 5MB limit)`)
+        }
+
+        return { content, size: content.length, isBinary: false }
+      } else {
+        // Read file from local machine
+        const resolved = path.isAbsolute(filePath) ? filePath : path.join(workdir, filePath)
+        const stat = fs.statSync(resolved)
+
+        if (stat.isDirectory()) {
+          throw new Error('Path is a directory, not a file')
+        }
+
+        if (stat.size > MAX_FILE_SIZE) {
+          throw new Error(`File too large (${(stat.size / 1024 / 1024).toFixed(1)}MB > 5MB limit)`)
+        }
+
+        if (isBinaryFile(resolved)) {
+          return { content: '[Binary file]', size: stat.size, isBinary: true }
+        }
+
+        const content = fs.readFileSync(resolved, 'utf-8')
+        return { content, size: stat.size, isBinary: false }
       }
-
-      if (stat.size > MAX_FILE_SIZE) {
-        throw new Error(`File too large (${(stat.size / 1024 / 1024).toFixed(1)}MB > 5MB limit)`)
-      }
-
-      if (isBinaryFile(resolved)) {
-        return { content: '[Binary file]', size: stat.size, isBinary: true }
-      }
-
-      const content = fs.readFileSync(resolved, 'utf-8')
-      return { content, size: stat.size, isBinary: false }
     } catch (err) {
       throw new Error(`Failed to read file: ${err instanceof Error ? err.message : String(err)}`)
     }
   })
 
-  ipcMain.handle('file:listDir', async (_e, { dirPath, workdir }) => {
+  ipcMain.handle('file:listDir', async (_e, { dirPath, workdir, isRemote, remoteHost }) => {
     try {
       if (!isSafeFile(dirPath)) {
         throw new Error('Invalid directory path')
       }
 
-      const resolved = path.isAbsolute(dirPath) ? dirPath : path.join(workdir, dirPath)
-      const files: Array<{ path: string; size: number; isDir: boolean }> = []
+      if (isRemote && remoteHost) {
+        // List files from remote machine via SSH
+        const [user, host] = remoteHost.split('@')
+        const ssh = await sshPool.getConnection({ user, host })
 
-      const walk = (dir: string, depth: number) => {
-        if (depth > 5) return // Limit recursion
+        // Use find to list files: find /dir -type f | head -1000
+        const ignorePatterns = Array.from(IGNORE_DIRS)
+          .map((d) => `'! -path "*/${d}/*"'`)
+          .join(' ')
+
+        const findCmd = `find "${dirPath}" -type f ${ignorePatterns} 2>/dev/null | head -1000`
+        let output = ''
         try {
-          const entries = fs.readdirSync(dir, { withFileTypes: true })
-          for (const entry of entries) {
-            if (IGNORE_DIRS.has(entry.name)) continue
+          output = await ssh.exec(findCmd)
+        } catch {
+          // Directory might not exist or be inaccessible
+          return { files: [] }
+        }
 
-            const fullPath = path.join(dir, entry.name)
-            const relPath = path.relative(workdir, fullPath)
+        const files: Array<{ path: string; size: number; isDir: boolean }> = output
+          .split('\n')
+          .filter((line) => line.trim())
+          .map((filePath) => ({
+            path: filePath,
+            isDir: false,
+            size: 0 // We can't easily get sizes via find + SSH without extra overhead
+          }))
+          .sort((a, b) => a.path.localeCompare(b.path))
 
-            if (entry.isDirectory()) {
-              files.push({ path: relPath, size: 0, isDir: true })
-              walk(fullPath, depth + 1)
-            } else if (entry.isFile()) {
-              try {
-                const size = fs.statSync(fullPath).size
-                files.push({ path: relPath, size, isDir: false })
-              } catch {
-                // Skip files we can't stat
+        if (files.length >= 1000) {
+          files.push({
+            path: '(directory contains >1000 files, truncated)',
+            isDir: false,
+            size: 0
+          })
+        }
+
+        return { files }
+      } else {
+        // List files from local machine
+        const resolved = path.isAbsolute(dirPath) ? dirPath : path.join(workdir, dirPath)
+        const files: Array<{ path: string; size: number; isDir: boolean }> = []
+
+        const walk = (dir: string, depth: number) => {
+          if (depth > 5) return // Limit recursion
+          try {
+            const entries = fs.readdirSync(dir, { withFileTypes: true })
+            for (const entry of entries) {
+              if (IGNORE_DIRS.has(entry.name)) continue
+
+              const fullPath = path.join(dir, entry.name)
+              const relPath = path.relative(workdir, fullPath)
+
+              if (entry.isDirectory()) {
+                files.push({ path: relPath, size: 0, isDir: true })
+                walk(fullPath, depth + 1)
+              } else if (entry.isFile()) {
+                try {
+                  const size = fs.statSync(fullPath).size
+                  files.push({ path: relPath, size, isDir: false })
+                } catch {
+                  // Skip files we can't stat
+                }
               }
             }
+          } catch {
+            // Skip directories we can't read
           }
-        } catch {
-          // Skip directories we can't read
         }
+
+        walk(resolved, 0)
+        // Sort: dirs first, then alphabetically
+        files.sort((a, b) => {
+          if (a.isDir !== b.isDir) return b.isDir ? 1 : -1
+          return a.path.localeCompare(b.path)
+        })
+
+        return { files }
       }
-
-      walk(resolved, 0)
-      // Sort: dirs first, then alphabetically
-      files.sort((a, b) => {
-        if (a.isDir !== b.isDir) return b.isDir ? 1 : -1
-        return a.path.localeCompare(b.path)
-      })
-
-      return { files }
     } catch (err) {
       throw new Error(`Failed to list directory: ${err instanceof Error ? err.message : String(err)}`)
     }

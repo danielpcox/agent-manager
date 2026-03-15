@@ -36,6 +36,17 @@ const statusConfig: Record<
     label: 'Killed',
     color: 'text-status-killed',
     dotClass: 'bg-status-killed'
+  },
+  reconnecting: {
+    label: 'Reconnecting',
+    color: 'text-orange-400',
+    dotClass: 'bg-orange-400',
+    animate: true
+  },
+  disconnected: {
+    label: 'Disconnected',
+    color: 'text-status-error',
+    dotClass: 'bg-status-error'
   }
 }
 
