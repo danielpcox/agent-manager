@@ -753,10 +753,24 @@ export class AgentManager {
   }
 
   private detectModelChange(agent: Agent, data: string): void {
-    const match = data.match(/claude-(?:opus|sonnet|haiku)-[\w.-]+/)
-    if (match && match[0] !== agent.model) {
-      agent.model = match[0]
+    // Match full model IDs like "claude-opus-4-6" or "claude-haiku-4-5-20251001"
+    const idMatch = data.match(/claude-(?:opus|sonnet|haiku)-[\w.-]+/)
+    if (idMatch && idMatch[0] !== agent.model) {
+      agent.model = idMatch[0]
       this.send('agent:updated', agent)
+      return
+    }
+
+    // Match display names from /model output like "Opus 4.6", "Sonnet 4.6", "Haiku 4.5"
+    const displayMatch = data.match(/\b(Opus|Sonnet|Haiku)\s+(\d+\.\d+)\b/)
+    if (displayMatch) {
+      const family = displayMatch[1].toLowerCase()
+      const version = displayMatch[2].replace('.', '-')
+      const modelId = `claude-${family}-${version}`
+      if (modelId !== agent.model) {
+        agent.model = modelId
+        this.send('agent:updated', agent)
+      }
     }
   }
 
